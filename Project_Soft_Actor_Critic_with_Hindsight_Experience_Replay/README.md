@@ -16,15 +16,3 @@ In our experiments, we were able to show that SAC with HER can solve sparse rewa
 Moreover, SAC+HER performed better than SAC with reward shaping.
 The results of comparing the different goal sampling strategies show that the k final significantly outperforms the simple final
 strategy, but still lags behind the future goal sampling strategy.
-
-
-## Video
-
-Below, you can find a short video, in which we give a short introduction into the topic, into our idea and our results.
-
-[![SAC+HER](https://i.ytimg.com/vi_webp/jHKqA4nxKmo/maxresdefault.webp)](https://www.youtube.com/watch?v=jHKqA4nxKmo)
-[https://www.youtube.com/watch?v=jHKqA4nxKmo](https://www.youtube.com/watch?v=jHKqA4nxKmo)
-
-
-
-
