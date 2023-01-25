@@ -5,7 +5,7 @@ This folder contains our final project for the course "Deep Reinforcement Learni
 **Authors**: Arne Klages, Erik Nickel and Jan-Luca Schröder.
 
 
-In this folder you can find our code, the evaluation and our [final paper](Deep-Reinforcement-Learning/Project_Soft_Actor_Critic_with_Hindsight_Experience_Replay/Soft_Actor_Critic_with_Hindsight_Experience_Replay.pdf).
+In this folder you can find our code, the evaluation and our [final paper](Soft_Actor_Critic_with_Hindsight_Experience_Replay.pdf).
 
 ## Project description
 In this project report, we show how HER can be implemented in combination with an Soft Actor-Critic (SAC) agent to solve sparse reward settings. 
