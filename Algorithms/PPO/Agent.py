@@ -1,132 +1,125 @@
-from EpisodeBuffer import EpisodeBuffer
+from ReplayBuffer import ReplayBuffer
+from Policy import Policy
+from RollOutWorker import RollOutWorker
 import tensorflow as tf
 from tensorflow import math as tfm
-from tensorflow_probability import distributions as tfd
+from tensorflow.keras.optimizers import Adam
 import numpy as np
+from collections.abc import Iterable
 
 
 class Agent:
 
-    def __init__(self, environment, actor_network_generator, critic_network_generator,
-                 batch_size=256, epsilon=0.2, gae_lambda=0.95, learning_rate=0.0003, gamma=0.99, kld_threshold=0.05):
-        self._environment = environment
-        self._batch_size = batch_size
+    def __init__(self, environments, actor_network_generator, critic_network_generator, updates_per_episode=80,
+                 epsilon=0.2, gae_lambda=0.95, learning_rate=0.0003, gamma=0.99, alpha=0.2, kld_threshold=0.05,
+                 normalize_adv=False):
+        self._updates_per_epoch = updates_per_episode
         self._epsilon = epsilon
         self._gae_lambda = gae_lambda
         self._gamma = gamma
+        self._alpha = alpha
         self._learning_rate = learning_rate
         self._mse = tf.keras.losses.MeanSquaredError()
-        self._policy_network = actor_network_generator(learning_rate)
-        self._value_network = critic_network_generator(learning_rate)
+        self._policy_network = actor_network_generator()
+        self._value_network = critic_network_generator()
+        self._optimizer_policy = Adam(learning_rate=learning_rate)  # TODO: one optimizer for both?
+        self._optimizer_value = Adam(learning_rate=learning_rate)
         self._kld_threshold = kld_threshold
-
-    # generalized advantage estimate
-    def estimate_advantage(self, rewards, values, dones):  # TODO: rework
-        advantage = np.zeros_like(rewards, dtype=np.float32)
-        for t in range(len(rewards) - 1):
-            discount = 1
-            a_t = 0
-            for k in range(t, len(rewards) - 1):
-                a_t += discount * (rewards[k] + self._gamma * values[k + 1] * (1 - dones[k]) - values[k])
-                discount *= self._gamma * self._gae_lambda
-            advantage[t] = a_t
-        return advantage
-
-    def calc_rewards_to_go(self, rewards, values, advantages):
-        g = np.zeros_like(rewards, dtype=np.float32)  # TODO: better implementation for discounting (cumsum, tf.scan)
-        for t in range(len(rewards)):
-            g_sum = 0
-            gamma_t = 1
-            for k in range(t, len(rewards)):
-                g_sum += rewards[k] * gamma_t
-                gamma_t *= self._gamma
-            g[t] = g_sum
-        return g
-
-    def calc_rewards_to_go2(self, rewards, values, advantages):
-        return advantages + np.asarray(values)
+        self._normalize_adv = normalize_adv
+        self._policy = Policy(self._policy_network)
+        # option for multiple workers for future parallelization
+        if not isinstance(environments, Iterable):
+            environments = [environments]
+        self._workers = [RollOutWorker(self._policy, self._value_network, env, self._gamma, self._gae_lambda)
+                         for env in environments]
 
     @tf.function
-    def distribution_form_policy(self, state):
-        mu, sigma = self._policy_network(state)
-        return tfd.Normal(mu, sigma)
-
-    @tf.function
-    def sample_actions_form_policy(self, state):
-        distribution = self.distribution_form_policy(state)
-        actions = distribution.sample()
-        log_probs = self.log_probs_form_distribution(distribution, actions)
-        return actions, log_probs
-
-    @tf.function
-    def log_probs_form_policy(self, state, actions):
-        distribution = self.distribution_form_policy(state)
-        return self.log_probs_form_distribution(distribution, actions)
-
-    def log_probs_form_distribution(self, distribution, actions):
-        log_probs = distribution.log_prob(actions)
-        return tfm.reduce_sum(log_probs, axis=-1, keepdims=True)
-
-    def act_deterministic(self, state):
-        actions_prime, _ = self._actor(tf.convert_to_tensor([state], dtype=tf.float32))
-        return self._act(actions_prime)
-
-    def act_stochastic(self, state):
-        actions_prime, log_probs = self.sample_actions_form_policy(tf.convert_to_tensor([state], dtype=tf.float32))
-        return self._act(actions_prime) + (log_probs,)
-
-    def _act(self, actions):
-        observation_prime, reward, terminated, truncated, _ = self._environment.step(actions[0])
-        return actions, observation_prime, reward, terminated or truncated
-
-    def learn(self, episode):
-        self.train_step_actor(episode)
-        self.train_step_critic(episode)
-
-    @tf.function
-    def train_step_actor(self, episode):
-        for s, a, _, _, adv, porb_old_policy in episode:
-            with tf.GradientTape() as tape:
-                porb_current_policy = self.log_probs_form_policy(s, a)
-                # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
-                p = tf.math.exp(porb_current_policy - porb_old_policy)  # exp() to un do log(p)
-                clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
-                loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
-            kld = tf.math.reduce_mean(porb_current_policy - porb_old_policy)  # aproximated Kullback Leibler Divergence
-            if tfm.abs(kld) > self._kld_threshold:  # early stoppling if KLD is too high
+    def learn(self, data_set):
+        kld, actor_loss, critic_loss = 0.0, 0.0, 0.0
+        kld_next, actor_loss_next = 0.0, 0.0
+        i = 0.0
+        for s, a, _, r_sum, adv, prob_old_policy in data_set:
+            early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
+            if early_stopping:
                 break
-            gradients = tape.gradient(loss, self._policy_network.trainable_variables)
-            self._policy_network.optimizer.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
+            kld += kld_next
+            actor_loss += actor_loss_next
+            critic_loss += self.train_step_critic(s, r_sum)
+            i += 1
+        return kld / i, actor_loss / i, critic_loss / i, i, kld_next
+
+    # Alternative that does not terminate the training of the value network if KLD is too high
+    @tf.function
+    def learn2(self, data_set):
+        kld, actor_loss, critic_loss = 0.0, 0.0, 0.0
+        kld_next, actor_loss_next = 0.0, 0.0
+        i = 0.0
+        j = 0.0
+        for s, a, _, r_sum, adv, prob_old_policy in data_set:
+            early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
+            if early_stopping:
+                break
+            kld += kld_next
+            actor_loss += actor_loss_next
+            i += 1
+        for s, a, _, r_sum, adv, prob_old_policy in data_set:
+            critic_loss += self.train_step_critic(s, r_sum)
+            j += 1
+        return kld / i, actor_loss / i, critic_loss / j, i, kld_next
 
     @tf.function
-    def train_step_critic(self, episode):
-        for s, _, _, r_sum, _, _ in episode:
-            with tf.GradientTape() as tape:
-                prev_v = self._value_network(s)
-                loss = self._mse(r_sum, prev_v)
-            gradients = tape.gradient(loss, self._value_network.trainable_variables)
-            self._value_network.optimizer.apply_gradients(zip(gradients, self._value_network.trainable_variables))
+    def train_step_actor(self, s, a, adv, prob_old_policy):
+        early_stopping = False
+        loss = 0.0
+        if self._normalize_adv:
+            adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
+        with tf.GradientTape() as tape:
+            distribution = self._policy.distribution_from_policy(s)
+            prob_current_policy = self._policy.log_probs_from_distribution(distribution, a)
+            log_ratio = prob_current_policy - prob_old_policy
+            kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)
+            if kld > self._kld_threshold:  # early stoppling if KLD is too high
+                early_stopping = True
+            else:
+                # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
+                p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)
+                clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
+                policy_loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
+                # entropy_loss = -tfm.reduce_mean(-prob_current_policy)  # approximate entropy
+                entropy_loss = -tfm.reduce_mean(distribution.entropy())
+                loss = policy_loss + self._alpha * entropy_loss
 
-    def sample_to_episode_buffer(self):
-        buffer = EpisodeBuffer(self.estimate_advantage, self.calc_rewards_to_go, self._batch_size)
-        s, _ = self._environment.reset()
-        d = 0
-        ret = 0
-        while not d:
-            a, s_p, r, d, p = self.act_stochastic(s)
-            ret += r
-            v = self._value_network(tf.convert_to_tensor([s], dtype=tf.float32))
-            buffer.add(s, tf.squeeze(a, 1), [r], tf.squeeze(v, 1), tf.squeeze(p, 1), d)
-            s = s_p
-        return buffer, ret
+                gradients = tape.gradient(loss, self._policy_network.trainable_variables)
+                self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
+        return early_stopping, kld, loss
 
-    def train(self, epochs):
+    @tf.function
+    def train_step_critic(self, s, r_sum):
+        with tf.GradientTape() as tape:
+            prev_v = self._value_network(s)
+            loss = self._mse(r_sum, prev_v)
+        gradients = tape.gradient(loss, self._value_network.trainable_variables)
+        self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
+        return loss
+
+    def train(self, epochs, batch_size=64, sub_epochs=4, steps_per_trajectory=1024):
         print("start training!")
         rets = []
+        replay_buffer = ReplayBuffer(batch_size)
         for e in range(epochs):
-            buffer, ret = self.sample_to_episode_buffer()
-            rets.append(ret)
-            print("epoch:", e, "return of episode:", ret, "avg 100:", np.average(rets[-100:]))
-            episode = buffer.get_as_data_set()
-            self.learn(episode)
+            trajectories = [worker.sample_trajectories(steps_per_trajectory) for worker in
+                            self._workers]
+            ac_ret = 0.0
+            ac_dones = 0
+            for episodes, ret, dones in trajectories:
+                replay_buffer.add_episodes(episodes)
+                ac_ret += ret
+                ac_dones += dones
+            ac_ret = ac_ret / len(self._workers)
+            rets.append(ac_ret)
+            print("epoch:", e, "return of episode:", ac_ret, "avg 10:", np.average(rets[-10:]), "dones:", ac_dones)
+            kld, actor_loss, critic_loss, i, last_kld = self.learn(replay_buffer.get_as_dataset_repeated(sub_epochs))
+            print(
+                f"kld: {kld}, actor_loss: {actor_loss}, critic_loss: {critic_loss}, updates: {i}, last_kld: {last_kld}")
+            replay_buffer.clear()
         print("training finished!")
