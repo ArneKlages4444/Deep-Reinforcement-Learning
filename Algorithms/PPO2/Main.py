@@ -13,4 +13,4 @@ if __name__ == '__main__':
                   actor_network_generator=partial(create_policy_network, state_dim=env.observation_space.shape[0],
                                                   action_dim=env.action_space.shape[0]),
                   critic_network_generator=partial(create_value_network, state_dim=env.observation_space.shape))
-    agent.train(10000, 1000)
+    agent.train(epochs=1000, max_steps_per_episode=200)
