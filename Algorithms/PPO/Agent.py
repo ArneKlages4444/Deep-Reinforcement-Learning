@@ -38,13 +38,13 @@ class Agent:
         kld, actor_loss, critic_loss = 0.0, 0.0, 0.0
         kld_next, actor_loss_next = 0.0, 0.0
         i = 0.0
-        for s, a, _, r_sum, adv, prob_old_policy in data_set:
+        for s, a, ret, adv, prob_old_policy in data_set:
             early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
             if early_stopping:
                 break
             kld += kld_next
             actor_loss += actor_loss_next
-            critic_loss += self.train_step_critic(s, r_sum)
+            critic_loss += self.train_step_critic(s, ret)
             i += 1
         return kld / i, actor_loss / i, critic_loss / i, i, kld_next
 
@@ -55,15 +55,15 @@ class Agent:
         kld_next, actor_loss_next = 0.0, 0.0
         i = 0.0
         j = 0.0
-        for s, a, _, r_sum, adv, prob_old_policy in data_set:
+        for s, a, _, adv, prob_old_policy in data_set:
             early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
             if early_stopping:
                 break
             kld += kld_next
             actor_loss += actor_loss_next
             i += 1
-        for s, a, _, r_sum, adv, prob_old_policy in data_set:
-            critic_loss += self.train_step_critic(s, r_sum)
+        for s, _, ret, _, _ in data_set:
+            critic_loss += self.train_step_critic(s, ret)
             j += 1
         return kld / i, actor_loss / i, critic_loss / j, i, kld_next
 
