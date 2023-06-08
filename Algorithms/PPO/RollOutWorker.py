@@ -1,13 +1,14 @@
 import tensorflow as tf
 import numpy as np
+from gymnasium.wrappers import FrameStack
 
 
 class RollOutWorker:
 
-    def __init__(self, policy, value_network, environment, gamma, gae_lambda):
+    def __init__(self, policy, value_network, environment, gamma, gae_lambda, window_size):
         self._policy = policy
         self._value_network = value_network
-        self._environment = environment
+        self._environment = environment if window_size is None else FrameStack(environment, window_size)
         self._gamma = gamma
         self._gae_lambda = gae_lambda
         self._s = []

@@ -4,16 +4,15 @@ from RollOutWorker import RollOutWorker
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
-import numpy as np
 from collections.abc import Iterable
+import datetime
 
 
 class Agent:
 
-    def __init__(self, environments, actor_network_generator, critic_network_generator, updates_per_episode=80,
+    def __init__(self, environments, actor_network_generator, critic_network_generator,
                  epsilon=0.2, gae_lambda=0.95, learning_rate=0.0003, gamma=0.99, alpha=0.2, kld_threshold=0.05,
-                 normalize_adv=False):
-        self._updates_per_epoch = updates_per_episode
+                 window_size=None, normalize_adv=False, logs=False):
         self._epsilon = epsilon
         self._gae_lambda = gae_lambda
         self._gamma = gamma
@@ -27,50 +26,59 @@ class Agent:
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
         self._policy = Policy(self._policy_network)
+        self._logs = logs
         # option for multiple workers for future parallelization
         if not isinstance(environments, Iterable):
             environments = [environments]
-        self._workers = [RollOutWorker(self._policy, self._value_network, env, self._gamma, self._gae_lambda)
-                         for env in environments]
+        self._workers = [
+            RollOutWorker(self._policy, self._value_network, env, self._gamma, self._gae_lambda, window_size)
+            for env in environments]
+        # Monitoring
+        self.episode_return = tf.keras.metrics.Mean('episode_return', dtype=tf.float32)
+        self.policy_loss = tf.keras.metrics.Mean('policy_loss', dtype=tf.float32)
+        self.value_loss = tf.keras.metrics.Mean('value_loss', dtype=tf.float32)
+        self.entropy_loss = tf.keras.metrics.Mean('entropy_loss', dtype=tf.float32)
+        self.approx_kld = tf.keras.metrics.Mean('approx_kld', dtype=tf.float32)
+        self.last_kld = tf.keras.metrics.Mean('last_kld', dtype=tf.float32)
+        self.network_updates = tf.keras.metrics.Sum('network_updates', dtype=tf.int32)
+        if logs:
+            self.summary_writer = tf.summary.create_file_writer(
+                f'logs/PPO_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}')
+
+    def reset_metrics(self):
+        self.episode_return.reset_states()
+        self.policy_loss.reset_states()
+        self.value_loss.reset_states()
+        self.entropy_loss.reset_states()
+        self.approx_kld.reset_states()
+        self.last_kld.reset_states()
+        self.network_updates.reset_states()
+
+    def save_metrics(self, epoch):
+        with self.summary_writer.as_default():
+            tf.summary.scalar('episode_return', self.episode_return.result(), step=epoch)
+            tf.summary.scalar('policy_loss', self.policy_loss.result(), step=epoch)
+            tf.summary.scalar('value_loss', self.value_loss.result(), step=epoch)
+            tf.summary.scalar('entropy_loss', self.entropy_loss.result(), step=epoch)
+            tf.summary.scalar('approx_kld', self.approx_kld.result(), step=epoch)
+            tf.summary.scalar('last_kld', self.last_kld.result(), step=epoch)
+            tf.summary.scalar('network_updates', self.network_updates.result(), step=epoch)
 
     @tf.function
     def learn(self, data_set):
-        kld, actor_loss, critic_loss = 0.0, 0.0, 0.0
-        kld_next, actor_loss_next = 0.0, 0.0
-        i = 0.0
+        kld = 0.0
         for s, a, ret, adv, prob_old_policy in data_set:
-            early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
+            early_stopping, kld = self.train_step_actor(s, a, adv, prob_old_policy)
             if early_stopping:
                 break
-            kld += kld_next
-            actor_loss += actor_loss_next
-            critic_loss += self.train_step_critic(s, ret)
-            i += 1
-        return kld / i, actor_loss / i, critic_loss / i, i, kld_next
-
-    # Alternative that does not terminate the training of the value network if KLD is too high
-    @tf.function
-    def learn2(self, data_set):
-        kld, actor_loss, critic_loss = 0.0, 0.0, 0.0
-        kld_next, actor_loss_next = 0.0, 0.0
-        i = 0.0
-        j = 0.0
-        for s, a, _, adv, prob_old_policy in data_set:
-            early_stopping, kld_next, actor_loss_next = self.train_step_actor(s, a, adv, prob_old_policy)
-            if early_stopping:
-                break
-            kld += kld_next
-            actor_loss += actor_loss_next
-            i += 1
-        for s, _, ret, _, _ in data_set:
-            critic_loss += self.train_step_critic(s, ret)
-            j += 1
-        return kld / i, actor_loss / i, critic_loss / j, i, kld_next
+            self.train_step_critic(s, ret)
+            self.approx_kld(kld)
+            self.network_updates(1)
+        self.last_kld(kld)
 
     @tf.function
     def train_step_actor(self, s, a, adv, prob_old_policy):
         early_stopping = False
-        loss = 0.0
         if self._normalize_adv:
             adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
         with tf.GradientTape() as tape:
@@ -91,35 +99,39 @@ class Agent:
 
                 gradients = tape.gradient(loss, self._policy_network.trainable_variables)
                 self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
-        return early_stopping, kld, loss
+                self.policy_loss(loss)
+                self.entropy_loss(entropy_loss)
+        self.approx_kld(kld)
+        return early_stopping, kld
 
     @tf.function
-    def train_step_critic(self, s, r_sum):
+    def train_step_critic(self, s, ret):
         with tf.GradientTape() as tape:
             prev_v = self._value_network(s)
-            loss = self._mse(r_sum, prev_v)
+            loss = self._mse(ret, prev_v)
         gradients = tape.gradient(loss, self._value_network.trainable_variables)
         self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
-        return loss
+        self.value_loss(loss)
 
     def train(self, epochs, batch_size=64, sub_epochs=4, steps_per_trajectory=1024):
         print("start training!")
-        rets = []
         replay_buffer = ReplayBuffer(batch_size)
         for e in range(epochs):
             trajectories = [worker.sample_trajectories(steps_per_trajectory) for worker in
                             self._workers]
-            ac_ret = 0.0
-            ac_dones = 0
             for episodes, ret, dones in trajectories:
                 replay_buffer.add_episodes(episodes)
-                ac_ret += ret
-                ac_dones += dones
-            ac_ret = ac_ret / len(self._workers)
-            rets.append(ac_ret)
-            print("epoch:", e, "return of episode:", ac_ret, "avg 10:", np.average(rets[-10:]), "dones:", ac_dones)
-            kld, actor_loss, critic_loss, i, last_kld = self.learn(replay_buffer.get_as_dataset_repeated(sub_epochs))
-            print(
-                f"kld: {kld}, actor_loss: {actor_loss}, critic_loss: {critic_loss}, updates: {i}, last_kld: {last_kld}")
+                if dones > 0:
+                    self.episode_return(ret)
+            print(f"epoch: {e} return of episode: {self.episode_return.result()}")
+            self.learn(replay_buffer.get_as_dataset_repeated(sub_epochs))
+            if self._logs:
+                self.save_metrics(e)
+            else:
+                print(
+                    f"actor_loss: {self.policy_loss.result()}, critic_loss: {self.value_loss.result()}, "
+                    f"updates: {self.network_updates.result()}, kld: {self.approx_kld.result()}, "
+                    f"last_kld: {self.last_kld.result()}")
             replay_buffer.clear()
+            self.reset_metrics()
         print("training finished!")
