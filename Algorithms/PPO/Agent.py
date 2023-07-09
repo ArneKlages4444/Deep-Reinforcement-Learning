@@ -1,18 +1,31 @@
-from ReplayBuffer import ReplayBuffer
 from Policy import Policy
 from RollOutWorker import RollOutWorker
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
-from collections.abc import Iterable
-import datetime
+import time
 
 
 class Agent:
-
-    def __init__(self, environments, actor_network_generator, critic_network_generator,
-                 epsilon=0.2, gae_lambda=0.95, learning_rate=0.0003, gamma=0.99, alpha=0.2, kld_threshold=0.05,
-                 window_size=None, normalize_adv=False, logs=False):
+    def __init__(
+            self,
+            environments,
+            actor_network_generator,
+            critic_network_generator,
+            epsilon=0.2,
+            gae_lambda=0.95,
+            learning_rate=0.0003,
+            gamma=0.99,
+            alpha=0.2,
+            kld_threshold=0.05,
+            normalize_adv=False,
+            log_dir=None,
+            verbose=False,
+            num_envs=4,
+            batch_size=256,
+            data_set_repeats=4,
+            steps_per_epoch=2048
+    ):
         self._epsilon = epsilon
         self._gae_lambda = gae_lambda
         self._gamma = gamma
@@ -21,29 +34,39 @@ class Agent:
         self._mse = tf.keras.losses.MeanSquaredError()
         self._policy_network = actor_network_generator()
         self._value_network = critic_network_generator()
-        self._optimizer_policy = Adam(learning_rate=learning_rate)  # TODO: one optimizer for both?
+        # TODO: one optimizer for both?
+        self._optimizer_policy = Adam(learning_rate=learning_rate)
         self._optimizer_value = Adam(learning_rate=learning_rate)
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
         self._policy = Policy(self._policy_network)
-        self._logs = logs
-        # option for multiple workers for future parallelization
-        if not isinstance(environments, Iterable):
-            environments = [environments]
-        self._workers = [
-            RollOutWorker(self._policy, self._value_network, env, self._gamma, self._gae_lambda, window_size)
-            for env in environments]
+        self._log_dir = log_dir
+        self._verbose = verbose
+        self._num_envs = num_envs
+        self._batch_size = batch_size
+        self._data_set_repeats = data_set_repeats
+        self._steps_per_trajectory = steps_per_epoch // num_envs
+        self._shuffle_buffer_size = 1024
+        self._roll_out_worker = RollOutWorker(
+            self._policy,
+            self._value_network,
+            environments,
+            self._gamma,
+            self._gae_lambda,
+            num_envs,
+        )
         # Monitoring
-        self._episode_return = tf.keras.metrics.Mean('episode_return', dtype=tf.float32)
-        self._policy_loss = tf.keras.metrics.Mean('policy_loss', dtype=tf.float32)
-        self._value_loss = tf.keras.metrics.Mean('value_loss', dtype=tf.float32)
-        self._entropy_loss = tf.keras.metrics.Mean('entropy_loss', dtype=tf.float32)
-        self._approx_kld = tf.keras.metrics.Mean('approx_kld', dtype=tf.float32)
-        self._last_kld = tf.keras.metrics.Mean('last_kld', dtype=tf.float32)
-        self._network_updates = tf.keras.metrics.Sum('network_updates', dtype=tf.int32)
-        if logs:
-            self.summary_writer = tf.summary.create_file_writer(
-                f'logs/PPO_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}')
+        self._episode_return = tf.keras.metrics.Mean("episode_return", dtype=tf.float32)
+        self._policy_loss = tf.keras.metrics.Mean("policy_loss", dtype=tf.float32)
+        self._value_loss = tf.keras.metrics.Mean("value_loss", dtype=tf.float32)
+        self._entropy_loss = tf.keras.metrics.Mean("entropy_loss", dtype=tf.float32)
+        self._approx_kld = tf.keras.metrics.Mean("approx_kld", dtype=tf.float32)
+        self._last_kld = tf.keras.metrics.Mean("last_kld", dtype=tf.float32)
+        self._network_updates = tf.keras.metrics.Sum("network_updates", dtype=tf.int32)
+        self._finished_episodes = tf.keras.metrics.Sum("finished_episodes", dtype=tf.int32)
+        self._time_steps = tf.keras.metrics.Sum("time_steps", dtype=tf.int32)
+        if log_dir is not None:
+            self.summary_writer = tf.summary.create_file_writer(log_dir)
 
     def reset_metrics(self):
         self._episode_return.reset_states()
@@ -54,15 +77,26 @@ class Agent:
         self._last_kld.reset_states()
         self._network_updates.reset_states()
 
-    def save_metrics(self, epoch):
+    def save_metrics(self, epoch, dones):
         with self.summary_writer.as_default():
-            tf.summary.scalar('episode_return', self._episode_return.result(), step=epoch)
-            tf.summary.scalar('policy_loss', self._policy_loss.result(), step=epoch)
-            tf.summary.scalar('value_loss', self._value_loss.result(), step=epoch)
-            tf.summary.scalar('entropy_loss', self._entropy_loss.result(), step=epoch)
-            tf.summary.scalar('approx_kld', self._approx_kld.result(), step=epoch)
-            tf.summary.scalar('last_kld', self._last_kld.result(), step=epoch)
-            tf.summary.scalar('network_updates', self._network_updates.result(), step=epoch)
+            episode_return = self._episode_return.result()
+            tf.summary.scalar("policy_loss", self._policy_loss.result(), step=epoch)
+            tf.summary.scalar("value_loss", self._value_loss.result(), step=epoch)
+            tf.summary.scalar("entropy_loss", self._entropy_loss.result(), step=epoch)
+            tf.summary.scalar("approx_kld", self._approx_kld.result(), step=epoch)
+            tf.summary.scalar("last_kld", self._last_kld.result(), step=epoch)
+            tf.summary.scalar("network_updates", self._network_updates.result(), step=epoch)
+            tf.summary.scalar("finished_episodes", self._finished_episodes.result(), step=epoch)
+            time_steps = self._time_steps.result()
+            tf.summary.scalar("time_steps", time_steps, step=epoch)
+            time_elapsed = time.time() - self.__start_time
+            tf.summary.scalar("time_elapsed", time_elapsed, step=epoch)
+
+            time_steps = tf.cast(time_steps, tf.int64)
+            tf.summary.scalar("time_elapsed_after_steps", time_elapsed, step=time_steps)
+            if dones > 0:
+                tf.summary.scalar("episode_return", episode_return, step=epoch)
+                tf.summary.scalar("rollout/ep_rew_mean", episode_return, step=time_steps)
 
     @tf.function
     def learn(self, data_set):
@@ -113,25 +147,28 @@ class Agent:
         self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
         self._value_loss(loss)
 
-    def train(self, epochs, batch_size=64, sub_epochs=4, steps_per_trajectory=1024):
+    def train(self, epochs):
         print("start training!")
-        replay_buffer = ReplayBuffer(batch_size)
+        self.__start_time = time.time()
         for e in range(epochs):
-            trajectories = [worker.sample_trajectories(steps_per_trajectory) for worker in
-                            self._workers]
-            for episodes, ret, dones in trajectories:
-                replay_buffer.add_episodes(episodes)
-                if dones > 0:
-                    self._episode_return(ret)
-            print(f"epoch: {e} return of episode: {self._episode_return.result()}")
-            self.learn(replay_buffer.get_as_dataset_repeated(sub_epochs))
-            if self._logs:
-                self.save_metrics(e)
-            else:
+            episodes_data_ds, ret, dones = self._roll_out_worker.sample_trajectories(self._steps_per_trajectory)
+            episodes_data_ds = episodes_data_ds.shuffle(
+                self._shuffle_buffer_size).batch(
+                self._batch_size).repeat(
+                self._data_set_repeats)
+            if dones > 0:
+                self._finished_episodes(dones)
+                self._episode_return(ret)
+            print(f"epoch: {e} return of episode: {self._episode_return.result()}, done episodes: {dones}")
+            self.learn(episodes_data_ds)
+            self._time_steps(self._steps_per_trajectory * self._num_envs)
+            if self._log_dir is not None:
+                self.save_metrics(e, dones)
+            if self._verbose:
                 print(
                     f"actor_loss: {self._policy_loss.result()}, critic_loss: {self._value_loss.result()}, "
                     f"updates: {self._network_updates.result()}, kld: {self._approx_kld.result()}, "
-                    f"last_kld: {self._last_kld.result()}")
-            replay_buffer.clear()
+                    f"last_kld: {self._last_kld.result()}"
+                )
             self.reset_metrics()
         print("training finished!")

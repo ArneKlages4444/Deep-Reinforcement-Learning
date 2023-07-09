@@ -1,27 +1,53 @@
-from Agent import Agent
-import gymnasium as gym
+import datetime
 from functools import partial
+
+import gymnasium as gym
 import tensorflow as tf
-from gymnasium.wrappers import NormalizeObservation
+from gymnasium.wrappers import FrameStack
 
-# from generic_LSTMs import create_policy_network, create_value_network
-from GenericMLPs1D import create_policy_network, create_value_network
+from Agent import Agent
+import networks.GenericMLPs1D as mlp
+import networks.GenericLSTMs as lstm
 
-env = gym.make("InvertedPendulum-v4")
+env_name = "InvertedPendulum-v4"
+num_envs = 4
+window_size = None  # 8
+log_dir = f'logs/{env_name}/PPO_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
 
-env = NormalizeObservation(env)
-if __name__ == '__main__':
+
+def main():
     tf.keras.backend.clear_session()
-    env = gym.make('InvertedPendulum-v4')
-    norm_obs = False
-    if norm_obs:
-        env = NormalizeObservation(env)
-    print("state_dim=", env.observation_space.shape, "action_dim=", env.action_space.shape[0], "action_scaling:",
-          env.action_space.high)
-    agent = Agent(environments=env,
-                  actor_network_generator=partial(create_policy_network, state_dim=env.observation_space.shape,
-                                                  action_dim=env.action_space.shape[0]),
-                  critic_network_generator=partial(create_value_network, state_dim=env.observation_space.shape),
-                  window_size=None)
 
-    agent.train(epochs=1000, batch_size=64, sub_epochs=4, steps_per_trajectory=640)
+    if window_size is not None:
+        envs = [lambda: FrameStack(gym.make(env_name), window_size) for _ in range(num_envs)]
+        env = gym.vector.SyncVectorEnv(envs)  # oder: env = gym.vector.AsyncVectorEnv(envs)
+        policy_network = lstm.create_policy_network
+        value_network = lstm.create_value_network
+    else:
+        env = gym.vector.make(env_name, num_envs=num_envs, asynchronous=False)
+        policy_network = mlp.create_policy_network
+        value_network = mlp.create_value_network
+
+    actor_network_generator = partial(
+        policy_network,
+        state_dim=env.single_observation_space.shape,
+        action_dim=env.single_action_space.shape[0],
+    )
+    critic_network_generator = partial(value_network, state_dim=env.single_observation_space.shape)
+
+    agent = Agent(
+        environments=env,
+        actor_network_generator=actor_network_generator,
+        critic_network_generator=critic_network_generator,
+        log_dir=log_dir,
+        verbose=True,
+        num_envs=num_envs,
+        batch_size=256,
+        data_set_repeats=4,
+        steps_per_epoch=2048
+    )
+    agent.train(epochs=100)
+
+
+if __name__ == "__main__":
+    main()
