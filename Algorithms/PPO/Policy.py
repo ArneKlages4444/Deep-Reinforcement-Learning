@@ -26,5 +26,5 @@ class Policy:
         actions_prime, log_probs = self.sample_actions_from_policy(
             tf.convert_to_tensor(state, dtype=tf.float32)
         )
-        observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime)
+        observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime.numpy())
         return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs
