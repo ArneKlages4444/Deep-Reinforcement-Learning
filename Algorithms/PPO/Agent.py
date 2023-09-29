@@ -19,6 +19,7 @@ class Agent:
             alpha=0.2,
             kld_threshold=0.05,
             normalize_adv=False,
+            value_loss_coefficient=0.5,
             log_dir=None,
             verbose=False,
             num_envs=4,
@@ -39,6 +40,7 @@ class Agent:
         self._optimizer_value = Adam(learning_rate=learning_rate)
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
+        self._value_loss_coefficient = value_loss_coefficient
         self._policy = Policy(self._policy_network)
         self._log_dir = log_dir
         self._verbose = verbose
@@ -102,50 +104,54 @@ class Agent:
     def learn(self, data_set):
         kld = 0.0
         for s, a, ret, adv, prob_old_policy in data_set:
-            early_stopping, kld = self.train_step_actor(s, a, adv, prob_old_policy)
-            if early_stopping:
-                break
-            self.train_step_critic(s, ret)
-            self._approx_kld(kld)
-            self._network_updates(1)
-        self._last_kld(kld)
+            if self._normalize_adv:
+                adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
+            with tf.GradientTape() as tape_policy, tf.GradientTape() as tape_value:
+                early_stopping, kld, actor_loss = self.actor_loss(s, a, adv, prob_old_policy)
+                if not early_stopping:
+                    value_loss = self.train_step_critic(s, ret)
+                    combined_loss = actor_loss + value_loss
+
+                    gradients = tape_policy.gradient(combined_loss, self._policy_network.trainable_variables)
+                    self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
+
+                    gradients = tape_value.gradient(combined_loss, self._value_network.trainable_variables)
+                    self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
+
+                    self._approx_kld(kld)
+                    self._network_updates(1)
+            self._last_kld(kld)
 
     @tf.function
-    def train_step_actor(self, s, a, adv, prob_old_policy):
+    def actor_loss(self, s, a, adv, prob_old_policy):
         early_stopping = False
-        if self._normalize_adv:
-            adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
-        with tf.GradientTape() as tape:
-            distribution = self._policy.distribution_from_policy(s)
-            prob_current_policy = self._policy.log_probs_from_distribution(distribution, a)
-            log_ratio = prob_current_policy - prob_old_policy
-            kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)
-            if kld > self._kld_threshold:  # early stoppling if KLD is too high
-                early_stopping = True
-            else:
-                # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
-                p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)
-                clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
-                policy_loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
-                # entropy_loss = -tfm.reduce_mean(-prob_current_policy)  # approximate entropy
-                entropy_loss = -tfm.reduce_mean(distribution.entropy())
-                loss = policy_loss + self._alpha * entropy_loss
+        loss = 0
+        distribution = self._policy.distribution_from_policy(s)
+        prob_current_policy = self._policy.log_probs_from_distribution(distribution, a)
+        log_ratio = prob_current_policy - prob_old_policy
+        kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)
+        if kld > self._kld_threshold:  # early stoppling if KLD is too high
+            early_stopping = True
+        else:
+            # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
+            p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)
+            clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
+            policy_loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
+            # entropy_loss = -tfm.reduce_mean(-prob_current_policy)  # approximate entropy
+            entropy_loss = -tfm.reduce_mean(distribution.entropy())
+            loss = policy_loss + self._alpha * entropy_loss
 
-                gradients = tape.gradient(loss, self._policy_network.trainable_variables)
-                self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
-                self._policy_loss(loss)
-                self._entropy_loss(entropy_loss)
+            self._policy_loss(loss)
+            self._entropy_loss(entropy_loss)
         self._approx_kld(kld)
-        return early_stopping, kld
+        return early_stopping, kld, loss
 
     @tf.function
     def train_step_critic(self, s, ret):
-        with tf.GradientTape() as tape:
-            prev_v = self._value_network(s)
-            loss = self._mse(ret, prev_v)
-        gradients = tape.gradient(loss, self._value_network.trainable_variables)
-        self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
+        prev_v = self._value_network(s)
+        loss = self._value_loss_coefficient * self._mse(ret, prev_v)
         self._value_loss(loss)
+        return loss
 
     def train(self, epochs):
         print("start training!")
