@@ -109,12 +109,11 @@ class Agent:
             with tf.GradientTape() as tape_policy, tf.GradientTape() as tape_value:
                 early_stopping, kld, actor_loss = self.actor_loss(s, a, adv, prob_old_policy)
                 if not early_stopping:
-                    value_loss = self.train_step_critic(s, ret)
+                    value_loss = self.critic_loss(s, ret)
                     combined_loss = actor_loss + value_loss
 
                     gradients = tape_policy.gradient(combined_loss, self._policy_network.trainable_variables)
                     self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
-
                     gradients = tape_value.gradient(combined_loss, self._value_network.trainable_variables)
                     self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
 
@@ -125,7 +124,7 @@ class Agent:
     @tf.function
     def actor_loss(self, s, a, adv, prob_old_policy):
         early_stopping = False
-        loss = 0
+        loss = 0.
         distribution = self._policy.distribution_from_policy(s)
         prob_current_policy = self._policy.log_probs_from_distribution(distribution, a)
         log_ratio = prob_current_policy - prob_old_policy
@@ -147,7 +146,7 @@ class Agent:
         return early_stopping, kld, loss
 
     @tf.function
-    def train_step_critic(self, s, ret):
+    def critic_loss(self, s, ret):
         prev_v = self._value_network(s)
         loss = self._value_loss_coefficient * self._mse(ret, prev_v)
         self._value_loss(loss)
