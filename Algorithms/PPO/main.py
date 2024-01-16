@@ -2,12 +2,9 @@ import datetime
 import gymnasium as gym
 import tensorflow as tf
 from gymnasium.wrappers import FrameStack
-from functools import partial
 
 from agent import Agent
-import networks.generic_mlp as mlp
-import networks.generic_lstm as lstm
-import networks.nature_cnn as cnn
+from policies.default_policies import MlpGaussianActorCriticPolicy
 
 env_name = "InvertedPendulum-v4"
 num_envs = 4
@@ -26,23 +23,18 @@ def main():
         env = gym.vector.make(env_name, num_envs=num_envs, asynchronous=False)
 
     if network_type == "cnn":
-        network = cnn.create_network
+        raise Exception(f"Unknown network type {network_type}")
     elif network_type == "rnn":
-        network = lstm.create_network
+        raise Exception(f"Unknown network type {network_type}")
     elif network_type == "mlp":
-        network = mlp.create_network
+        policy = MlpGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
+                                              state_dim=env.single_observation_space.shape)
     else:
         raise Exception(f"Unknown network type {network_type}")
 
-    network_generator = partial(
-        network,
-        state_dim=env.single_observation_space.shape,
-        action_dim=env.single_action_space.shape[0],
-    )
-
     agent = Agent(
         environments=env,
-        network_generator=network_generator,
+        policy=policy,
         normalize_adv=False,
         log_dir=log_dir,
         verbose=True,

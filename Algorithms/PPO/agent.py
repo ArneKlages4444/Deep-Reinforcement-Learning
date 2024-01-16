@@ -11,8 +11,7 @@ class Agent:
     def __init__(
             self,
             environments,
-            network_generator,
-            separate_actor_critic=True,
+            policy: ActorCriticPolicy,
             epsilon=0.2,
             gae_lambda=0.95,
             learning_rate=0.0003,
@@ -39,7 +38,7 @@ class Agent:
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
         self._value_loss_coefficient = value_loss_coefficient
-        self._policy = ActorCriticPolicy(network_generator, separate_actor_critic)
+        self._policy = policy
         self._log_dir = log_dir
         self._verbose = verbose
         self._num_envs = num_envs
