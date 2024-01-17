@@ -4,7 +4,7 @@ import tensorflow as tf
 from gymnasium.wrappers import FrameStack
 
 from agent import Agent
-from policies.default_policies import MlpGaussianActorCriticPolicy
+from policies import MlpGaussianActorCriticPolicy, CnnGaussianActorCriticPolicy, LstmGaussianActorCriticPolicy
 
 env_name = "InvertedPendulum-v4"
 num_envs = 4
@@ -23,9 +23,11 @@ def main():
         env = gym.vector.make(env_name, num_envs=num_envs, asynchronous=False)
 
     if network_type == "cnn":
-        raise Exception(f"Unknown network type {network_type}")
+        policy = CnnGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
+                                              state_dim=env.single_observation_space.shape)
     elif network_type == "rnn":
-        raise Exception(f"Unknown network type {network_type}")
+        policy = LstmGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
+                                               state_dim=env.single_observation_space.shape)
     elif network_type == "mlp":
         policy = MlpGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
                                               state_dim=env.single_observation_space.shape)

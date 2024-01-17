@@ -1,8 +1,6 @@
 import tensorflow as tf
 import tensorflow.keras as keras
-from tensorflow.keras.layers import Dense, Layer
-
-import tensorflow as tf
+from tensorflow.keras.layers import Layer, Dense, LSTM, Conv2D, MaxPool2D, Flatten, Reshape, Rescaling, Concatenate
 from tensorflow import math as tfm
 from tensorflow_probability import distributions as tfd
 
@@ -84,28 +82,6 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
         return mu
 
 
-class SigmaLayer(Layer):
-
-    # initializer= 'zeros' or 'ones' or 'uniform'
-    def __init__(self, dim, initializer='zeros', **kwargs):
-        self.dim = dim
-        self.initializer_sigma = initializer
-        super(SigmaLayer, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.sigma = self.add_weight(name='sigma',
-                                     shape=(self.dim,),
-                                     initializer=self.initializer_sigma,
-                                     trainable=True)
-        super(SigmaLayer, self).build(input_shape)
-
-    def call(self, x=None):
-        return self.sigma
-
-    def compute_output_shape(self, input_shape):
-        return (self.dim,)
-
-
 class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
     def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing, shared_networks=False):
         self.shared_networks = shared_networks
@@ -139,6 +115,65 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
 
         y = Dense(256, activation=tf.nn.relu)(inputs)
         y = Dense(256, activation=tf.nn.relu)(y)
+        y = Dense(256, activation=tf.nn.relu)(y)
+        value = Dense(1, activation=None)(y)
+
+        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
+        return model
+
+
+class CnnGaussianActorCriticPolicy(GaussianActorCriticPolicy):
+    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing):
+        super().__init__(state_dim, action_dim, sigma_processing)
+
+    def create_actor_critic_network(self):
+        inputs = keras.Input(shape=self.state_dim)
+        x = Rescaling(scale=1.0 / 255.0, offset=0)(inputs)
+        x = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu)(x)
+        x = Conv2D(filters=64, kernel_size=4, strides=2, padding="valid", activation=tf.nn.relu)(x)
+        x = Conv2D(filters=64, kernel_size=3, strides=1, padding="valid", activation=tf.nn.relu)(x)
+        x = Flatten()(x)
+        x = Dense(256)(x)
+        value = Dense(1, activation=None)(x)
+        mu = Dense(self.action_dim, activation=None)(x)
+        sigma = Dense(self.action_dim, kernel_initializer="zeros")(x)
+        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
+        return model
+
+
+class LstmGaussianActorCriticPolicy(GaussianActorCriticPolicy):
+    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing, shared_networks=False):
+        self.shared_networks = shared_networks
+        super().__init__(state_dim, action_dim, sigma_processing)
+
+    def create_actor_critic_network(self):
+        if self.shared_networks:
+            return self._creat_network()
+        else:
+            return self._creat_network_separate()
+
+    def _creat_network(self):
+        inputs = keras.Input(shape=self.state_dim)
+        x = LSTM(256, return_sequences=True)(inputs)
+        x = LSTM(256)(x)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        value = Dense(1, activation=None)(x)
+        mu = Dense(self.action_dim, activation=None)(x)
+        sigma = Dense(self.action_dim, kernel_initializer="zeros")(x)
+        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
+        return model
+
+    def _creat_network_separate(self):
+        inputs = keras.Input(shape=self.state_dim)
+
+        x = LSTM(256, return_sequences=True)(inputs)
+        x = LSTM(256)(x)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        mu = Dense(self.action_dim, activation=None)(x)
+        sigma = Dense(self.action_dim, kernel_initializer="zeros")(x)
+
+        y = LSTM(256, return_sequences=True)(inputs)
+        y = LSTM(256)(y)
         y = Dense(256, activation=tf.nn.relu)(y)
         value = Dense(1, activation=None)(y)
 
