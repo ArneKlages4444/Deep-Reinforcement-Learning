@@ -3,7 +3,7 @@ from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
 import time
 
-from policies.actor_critic_policy import ActorCriticPolicy
+from policies.default_policies import ActorCriticPolicy
 from roll_out_worker import RollOutWorker
 
 

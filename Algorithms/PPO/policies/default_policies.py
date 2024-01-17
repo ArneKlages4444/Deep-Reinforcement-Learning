@@ -39,7 +39,7 @@ def log_sigma_processing(log_sigma):
 
 
 def clip_sigma_processing(sigma):
-    return tf.clip_by_value(sigma, 0 + 1e-8, tf.float32.max)
+    return tf.clip_by_value(sigma, 0, tf.float32.max)
 
 
 def softplus_sigma_processing(sigma):
@@ -86,14 +86,17 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
 
 class SigmaLayer(Layer):
 
-    # initializer= 'ones' or 'uniform'
-    def __init__(self, dim, initializer='uniform', **kwargs):
+    # initializer= 'zeros' or 'ones' or 'uniform'
+    def __init__(self, dim, initializer='zeros', **kwargs):
         self.dim = dim
         self.initializer_sigma = initializer
         super(SigmaLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.sigma = self.add_weight(name='mean', shape=(self.dim,), initializer=self.initializer_sigma, trainable=True)
+        self.sigma = self.add_weight(name='sigma',
+                                     shape=(self.dim,),
+                                     initializer=self.initializer_sigma,
+                                     trainable=True)
         super(SigmaLayer, self).build(input_shape)
 
     def call(self, x=None):
@@ -121,7 +124,7 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         x = Dense(256, activation=tf.nn.relu)(x)
         value = Dense(1, activation=None)(x)
         mu = Dense(self.action_dim, activation=None)(x)
-        sigma = SigmaLayer(self.action_dim)(x)
+        sigma = Dense(self.action_dim, kernel_initializer="zeros")(x)
         model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
         return model
 
@@ -132,8 +135,7 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         x = Dense(256, activation=tf.nn.relu)(x)
         x = Dense(256, activation=tf.nn.relu)(x)
         mu = Dense(self.action_dim, activation=None)(x)
-
-        sigma = SigmaLayer(self.action_dim)(x)
+        sigma = Dense(self.action_dim, kernel_initializer="zeros")(x)
 
         y = Dense(256, activation=tf.nn.relu)(inputs)
         y = Dense(256, activation=tf.nn.relu)(y)
