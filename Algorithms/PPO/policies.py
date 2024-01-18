@@ -44,10 +44,23 @@ def softplus_sigma_processing(sigma):
     return tfm.softplus(sigma)
 
 
+def no_action_handling(actions, min_action, max_action):
+    return actions
+
+
+def clip_action_handling(actions, min_action, max_action):
+    return tf.clip_by_value(actions, min_action, max_action)
+
+
 class GaussianActorCriticPolicy(ActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing):
+    def __init__(self, state_dim, action_dim, action_space,
+                 sigma_processing=log_sigma_processing,
+                 action_handling=clip_action_handling):
         super().__init__(state_dim, action_dim)
+        self.min_action = tf.constant(action_space.low, dtype=tf.float32)
+        self.max_action = tf.constant(action_space.high, dtype=tf.float32)
         self.sigma_processing = sigma_processing
+        self.action_handling = action_handling
         self.network = self.create_actor_critic_network()
 
     def create_actor_critic_network(self):
@@ -75,17 +88,22 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
         distribution = tfd.Normal(mu, sigma)
         actions_prime = distribution.sample()
         log_probs = self._log_probs_from_distribution(distribution, actions_prime)
+        actions_prime = self.action_handling(actions_prime, self.min_action, self.max_action)
         return actions_prime, log_probs, value
 
     def act_deterministic(self, state):
         mu, _, _ = self.network(state)
-        return mu
+        actions = self.action_handling(mu, self.min_action, self.max_action)
+        return actions
 
 
 class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing, shared_networks=False):
+    def __init__(self, state_dim, action_dim, action_space,
+                 sigma_processing=log_sigma_processing,
+                 action_handling=no_action_handling,
+                 shared_networks=False):
         self.shared_networks = shared_networks
-        super().__init__(state_dim, action_dim, sigma_processing)
+        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
 
     def create_actor_critic_network(self):
         if self.shared_networks:
@@ -123,8 +141,10 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
 
 
 class CnnGaussianActorCriticPolicy(GaussianActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing):
-        super().__init__(state_dim, action_dim, sigma_processing)
+    def __init__(self, state_dim, action_dim, action_space,
+                 sigma_processing=log_sigma_processing,
+                 action_handling=no_action_handling):
+        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
 
     def create_actor_critic_network(self):
         inputs = keras.Input(shape=self.state_dim)
@@ -142,9 +162,11 @@ class CnnGaussianActorCriticPolicy(GaussianActorCriticPolicy):
 
 
 class LstmGaussianActorCriticPolicy(GaussianActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, sigma_processing=log_sigma_processing, shared_networks=False):
+    def __init__(self, state_dim, action_dim, action_space,
+                 sigma_processing=log_sigma_processing,
+                 action_handling=no_action_handling, shared_networks=False):
         self.shared_networks = shared_networks
-        super().__init__(state_dim, action_dim, sigma_processing)
+        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
 
     def create_actor_critic_network(self):
         if self.shared_networks:

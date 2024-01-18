@@ -24,13 +24,16 @@ def main():
 
     if network_type == "cnn":
         policy = CnnGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                              state_dim=env.single_observation_space.shape)
+                                              state_dim=env.single_observation_space.shape,
+                                              action_space=env.single_action_space)
     elif network_type == "rnn":
         policy = LstmGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                               state_dim=env.single_observation_space.shape)
+                                               state_dim=env.single_observation_space.shape,
+                                               action_space=env.single_action_space)
     elif network_type == "mlp":
         policy = MlpGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                              state_dim=env.single_observation_space.shape)
+                                              state_dim=env.single_observation_space.shape,
+                                              action_space=env.single_action_space)
     else:
         raise Exception(f"Unknown network type {network_type}")
 
