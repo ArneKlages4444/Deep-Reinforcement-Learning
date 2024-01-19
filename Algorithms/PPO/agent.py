@@ -113,8 +113,8 @@ class Agent:
                     value_loss = self._value_loss_coefficient * self._mse(ret, prev_v)
                     combined_loss = actor_loss + value_loss
 
-                    gradients = tape.gradient(combined_loss, self._policy.network.trainable_variables)
-                    self._optimizer.apply_gradients(zip(gradients, self._policy.network.trainable_variables))
+                    gradients = tape.gradient(combined_loss, self._policy.parameters())
+                    self._optimizer.apply_gradients(zip(gradients, self._policy.parameters()))
 
                     self._value_loss(value_loss)
                     self._approx_kld(kld)
