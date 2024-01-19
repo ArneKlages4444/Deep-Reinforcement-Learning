@@ -229,7 +229,7 @@ class DiscreteActorCriticPolicy(ActorCriticPolicy):
 
     def __call__(self, s, a):
         logits, value = self._network(s)
-        distribution = tfd.Categorical(probs=logits)
+        distribution = tfd.Categorical(logits=logits)
         prob_current_policy = self._log_probs_from_distribution(distribution, tf.squeeze(a, -1))
         entropy = distribution.entropy()
         return prob_current_policy, entropy, value
@@ -244,7 +244,7 @@ class DiscreteActorCriticPolicy(ActorCriticPolicy):
 
     def act_stochastic(self, state):
         logits, value = self._network(state)
-        distribution = tfd.Categorical(probs=logits)
+        distribution = tfd.Categorical(logits=logits)
         actions_prime = distribution.sample()
         log_probs = self._log_probs_from_distribution(distribution, actions_prime)
         actions_prime = tf.expand_dims(actions_prime, -1)
@@ -287,7 +287,7 @@ class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
         x = Dense(256, activation=tf.nn.relu)(inputs)
         x = Dense(256, activation=tf.nn.relu)(x)
         x = Dense(256, activation=tf.nn.relu)(x)
-        logits = Dense(self._n_actions, activation='softmax')(x)
+        logits = Dense(self._n_actions, activation=None)(x)
 
         y = Dense(256, activation=tf.nn.relu)(inputs)
         y = Dense(256, activation=tf.nn.relu)(y)
