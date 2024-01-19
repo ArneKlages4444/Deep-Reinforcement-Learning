@@ -3,36 +3,39 @@ import tensorflow.keras as keras
 from tensorflow.keras.layers import Layer, Dense, LSTM, Conv2D, MaxPool2D, Flatten, Reshape, Rescaling, Concatenate
 from tensorflow import math as tfm
 from tensorflow_probability import distributions as tfd
+import numpy as np
 
 
 class ActorCriticPolicy:
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim):
         self._state_dim = state_dim
-        self._action_dim = action_dim
         self._network = self.create_actor_critic_network()
-
-    # return combined_actor_critic_model
-    def create_actor_critic_network(self):
-        pass
-
-    # return prob_current_policy, entropy, value
-    def __call__(self, s, a):
-        pass
-
-    # return value
-    def get_value(self, state):
-        pass
-
-    # return actions_prime, log_probs, value
-    def act_stochastic(self, state):
-        pass
-
-    # return actions
-    def act_deterministic(self, state):
-        pass
 
     def parameters(self):
         return self._network.trainable_variables
+
+    # return combined_actor_critic_model
+    def create_actor_critic_network(self):
+        return None
+
+    # return prob_current_policy, entropy, value
+    def __call__(self, s, a):
+        raise NotImplementedError()
+
+    # return value
+    def get_value(self, state):
+        raise NotImplementedError()
+
+    # return actions_prime, log_probs, value
+    def act_stochastic(self, state):
+        raise NotImplementedError()
+
+    # return actions
+    def act_deterministic(self, state):
+        raise NotImplementedError()
+
+    def act_stochastic_in_env(self, state, environment):
+        raise NotImplementedError()
 
 
 def log_sigma_processing(log_sigma):
@@ -59,7 +62,8 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
     def __init__(self, state_dim, action_dim, action_space,
                  sigma_processing=log_sigma_processing,
                  action_handling=clip_action_handling):
-        super().__init__(state_dim, action_dim)
+        self._action_dim = action_dim
+        super().__init__(state_dim)
         self._min_action = tf.constant(action_space.low, dtype=tf.float32)
         self._max_action = tf.constant(action_space.high, dtype=tf.float32)
         self._sigma_processing = sigma_processing
@@ -97,6 +101,11 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
         mu, _, _ = self._network(state)
         actions = self._action_handling(mu, self._min_action, self._max_action)
         return actions
+
+    def act_stochastic_in_env(self, state, environment):
+        actions_prime, log_probs, value = self.act_stochastic(state)
+        observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime.numpy())
+        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
 
 
 class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
@@ -207,4 +216,83 @@ class LstmGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         value = Dense(1, activation=None)(y)
 
         model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
+        return model
+
+
+class DiscreteActorCriticPolicy(ActorCriticPolicy):
+    def __init__(self, state_dim, n_actions):
+        self._n_actions = n_actions
+        super().__init__(state_dim)
+
+    def create_actor_critic_network(self):
+        raise NotImplementedError()
+
+    def __call__(self, s, a):
+        logits, value = self._network(s)
+        distribution = tfd.Categorical(probs=logits)
+        prob_current_policy = self._log_probs_from_distribution(distribution, tf.squeeze(a, -1))
+        entropy = distribution.entropy()
+        return prob_current_policy, entropy, value
+
+    def get_value(self, state):
+        _, value = self._network(state)
+        return value
+
+    def _log_probs_from_distribution(self, distribution, actions):
+        log_probs = distribution.log_prob(actions)
+        return tf.expand_dims(log_probs, -1)
+
+    def act_stochastic(self, state):
+        logits, value = self._network(state)
+        distribution = tfd.Categorical(probs=logits)
+        actions_prime = distribution.sample()
+        log_probs = self._log_probs_from_distribution(distribution, actions_prime)
+        actions_prime = tf.expand_dims(actions_prime, -1)
+        return actions_prime, log_probs, value
+
+    def act_deterministic(self, state):
+        logits, _ = self._network(state)
+        return tf.math.argmax(logits, axis=-1, output_type=tf.dtypes.int32)
+
+    def act_stochastic_in_env(self, state, environment):
+        actions_prime, log_probs, value = self.act_stochastic(state)
+        observation_prime, reward, terminated, truncated, _ = environment.step(tf.squeeze(actions_prime, -1).numpy())
+        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
+
+
+class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
+    def __init__(self, state_dim, n_actions, shared_networks=False):
+        self._shared_networks = shared_networks
+        super().__init__(state_dim, n_actions)
+
+    def create_actor_critic_network(self):
+        if self._shared_networks:
+            return self._creat_network()
+        else:
+            return self._creat_network_separate()
+
+    def _creat_network(self):
+        inputs = keras.Input(shape=self._state_dim)
+        x = Dense(256, activation=tf.nn.relu)(inputs)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        value = Dense(1, activation=None)(x)
+        logits = Dense(self._n_actions, activation=None)(x)
+        model = keras.Model(inputs=inputs, outputs=(logits, value))
+        return model
+
+    def _creat_network_separate(self):
+        inputs = keras.Input(shape=self._state_dim)
+
+        x = Dense(256, activation=tf.nn.relu)(inputs)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        x = Dense(256, activation=tf.nn.relu)(x)
+        logits = Dense(self._n_actions, activation='softmax')(x)
+
+        y = Dense(256, activation=tf.nn.relu)(inputs)
+        y = Dense(256, activation=tf.nn.relu)(y)
+        y = Dense(256, activation=tf.nn.relu)(y)
+        value = Dense(1, activation=None)(y)
+
+        model = keras.Model(inputs=inputs, outputs=(logits, value))
         return model

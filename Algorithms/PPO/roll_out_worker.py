@@ -77,7 +77,7 @@ class RollOutWorker:
         ack_ret = 0.0
         x = 0.0
         for _ in range(steps_per_trajectory):
-            a, self.__s_p, r, self.__d_p, p, v = self.act_stochastic(self.__s, self._environment)
+            a, self.__s_p, r, self.__d_p, p, v = self._policy.act_stochastic_in_env(self.__s, self._environment)
             self.__d_p = self.__d_p.astype(float)
             self.__ret += r
             v = tf.squeeze(v, -1)
@@ -104,8 +104,3 @@ class RollOutWorker:
         ds = tf.data.Dataset.from_tensor_slices((states, actions, returns, advantages, log_probs)).unbatch()
         self.clear()
         return ds, self.__ret if x < 1 else ack_ret / x, x
-
-    def act_stochastic(self, state, environment):
-        actions_prime, log_probs, value = self._policy.act_stochastic(state)
-        observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime.numpy())
-        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
