@@ -1,24 +1,26 @@
-from Policy import Policy
-from RollOutWorker import RollOutWorker
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
 import time
+
+from policies import ActorCriticPolicy
+from roll_out_worker import RollOutWorker
 
 
 class Agent:
     def __init__(
             self,
             environments,
-            actor_network_generator,
-            critic_network_generator,
+            policy: ActorCriticPolicy,
             epsilon=0.2,
             gae_lambda=0.95,
             learning_rate=0.0003,
             gamma=0.99,
             alpha=0.2,
             kld_threshold=0.05,
-            normalize_adv=False,
+            normalize_adv=True,
+            value_loss_coefficient=0.5,
+            global_clipnorm=0.5,
             log_dir=None,
             verbose=False,
             num_envs=4,
@@ -32,14 +34,11 @@ class Agent:
         self._alpha = alpha
         self._learning_rate = learning_rate
         self._mse = tf.keras.losses.MeanSquaredError()
-        self._policy_network = actor_network_generator()
-        self._value_network = critic_network_generator()
-        # TODO: one optimizer for both?
-        self._optimizer_policy = Adam(learning_rate=learning_rate)
-        self._optimizer_value = Adam(learning_rate=learning_rate)
+        self._optimizer = Adam(learning_rate=learning_rate, global_clipnorm=global_clipnorm)
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
-        self._policy = Policy(self._policy_network)
+        self._value_loss_coefficient = value_loss_coefficient
+        self._policy = policy
         self._log_dir = log_dir
         self._verbose = verbose
         self._num_envs = num_envs
@@ -49,7 +48,6 @@ class Agent:
         self._shuffle_buffer_size = 1024
         self._roll_out_worker = RollOutWorker(
             self._policy,
-            self._value_network,
             environments,
             self._gamma,
             self._gae_lambda,
@@ -100,52 +98,41 @@ class Agent:
 
     @tf.function
     def learn(self, data_set):
-        kld = 0.0
+        kld = 0.
         for s, a, ret, adv, prob_old_policy in data_set:
-            early_stopping, kld = self.train_step_actor(s, a, adv, prob_old_policy)
-            if early_stopping:
-                break
-            self.train_step_critic(s, ret)
-            self._approx_kld(kld)
-            self._network_updates(1)
-        self._last_kld(kld)
+            if self._normalize_adv:
+                adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
+            with tf.GradientTape() as tape:
+                prob_current_policy, entropy, prev_v = self._policy(s, a)
+                actor_loss = self.actor_loss(adv, prob_old_policy, prob_current_policy, entropy)
 
-    @tf.function
-    def train_step_actor(self, s, a, adv, prob_old_policy):
-        early_stopping = False
-        if self._normalize_adv:
-            adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
-        with tf.GradientTape() as tape:
-            distribution = self._policy.distribution_from_policy(s)
-            prob_current_policy = self._policy.log_probs_from_distribution(distribution, a)
-            log_ratio = prob_current_policy - prob_old_policy
-            kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)
-            if kld > self._kld_threshold:  # early stoppling if KLD is too high
-                early_stopping = True
-            else:
-                # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
-                p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)
-                clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
-                policy_loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
-                # entropy_loss = -tfm.reduce_mean(-prob_current_policy)  # approximate entropy
-                entropy_loss = -tfm.reduce_mean(distribution.entropy())
-                loss = policy_loss + self._alpha * entropy_loss
+                log_ratio = prob_current_policy - prob_old_policy
+                kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)  # approximate kld
+                self._approx_kld(kld)
+                if kld < self._kld_threshold:
+                    value_loss = self._value_loss_coefficient * self._mse(ret, prev_v)
+                    combined_loss = actor_loss + value_loss
 
-                gradients = tape.gradient(loss, self._policy_network.trainable_variables)
-                self._optimizer_policy.apply_gradients(zip(gradients, self._policy_network.trainable_variables))
-                self._policy_loss(loss)
-                self._entropy_loss(entropy_loss)
-        self._approx_kld(kld)
-        return early_stopping, kld
+                    gradients = tape.gradient(combined_loss, self._policy.parameters())
+                    self._optimizer.apply_gradients(zip(gradients, self._policy.parameters()))
 
-    @tf.function
-    def train_step_critic(self, s, ret):
-        with tf.GradientTape() as tape:
-            prev_v = self._value_network(s)
-            loss = self._mse(ret, prev_v)
-        gradients = tape.gradient(loss, self._value_network.trainable_variables)
-        self._optimizer_value.apply_gradients(zip(gradients, self._value_network.trainable_variables))
-        self._value_loss(loss)
+                    self._value_loss(value_loss)
+                    self._approx_kld(kld)
+                    self._network_updates(1)
+            self._last_kld(kld)
+
+    def actor_loss(self, adv, prob_old_policy, prob_current_policy, entropy):
+        # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
+        p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)
+        clipped_p = tf.clip_by_value(p, 1 - self._epsilon, 1 + self._epsilon)
+        policy_loss = -tfm.reduce_mean(tfm.minimum(p * adv, clipped_p * adv))
+        # entropy_loss = -tfm.reduce_mean(-prob_current_policy)  # approximate entropy
+        entropy_loss = -tfm.reduce_mean(entropy)
+        loss = policy_loss + self._alpha * entropy_loss
+
+        self._policy_loss(loss)
+        self._entropy_loss(entropy_loss)
+        return loss
 
     def train(self, epochs):
         print("start training!")

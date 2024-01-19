@@ -6,14 +6,12 @@ class RollOutWorker:
     def __init__(
             self,
             policy,
-            value_network,
             environment,
             gamma,
             gae_lambda,
             num_envs,
     ):
         self._policy = policy
-        self._value_network = value_network
         self._environment = environment
         self._gamma = gamma
         self._gae_lambda = gae_lambda
@@ -79,13 +77,10 @@ class RollOutWorker:
         ack_ret = 0.0
         x = 0.0
         for _ in range(steps_per_trajectory):
-            a, self.__s_p, r, self.__d_p, p = self._policy.act_stochastic(self.__s, self._environment)
+            a, self.__s_p, r, self.__d_p, p, v = self._policy.act_stochastic_in_env(self.__s, self._environment)
             self.__d_p = self.__d_p.astype(float)
             self.__ret += r
-            v = tf.squeeze(
-                self._value_network(tf.convert_to_tensor(self.__s, dtype=tf.float32)),
-                -1,
-            )
+            v = tf.squeeze(v, -1)
             self.add(self.__s, a, r, v, p, self.__d)
             if np.any(self.__d_p):
                 x += np.sum(self.__d_p)
@@ -94,10 +89,9 @@ class RollOutWorker:
             self.__s = self.__s_p
             self.__d = self.__d_p
         v_p = tf.squeeze(
-            self._value_network(tf.convert_to_tensor(self.__s_p, dtype=tf.float32)),
+            self._policy.get_value(tf.convert_to_tensor(self.__s_p, dtype=tf.float32)),
             -1
         )
-
         states, actions, rewards, values, log_probs, dones = self.results_to_tensors()
         adv = self.estimate_advantage(
             rewards, values, dones,

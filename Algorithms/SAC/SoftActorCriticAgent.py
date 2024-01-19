@@ -27,13 +27,13 @@ class Agent:
     :param action_dim: Dimensions of the action space
     :param actor_network_generator: a generator function for the actor network
         signature: learning_rate, state_dim, action_dim -> tensorflow Model
-    :param critic_network_generator: a generator function for the critic networks (Q-networks)
+    :param critic_network_generator: a generator function for the critic policies (Q-policies)
         signature: learning_rate, state_dim, action_dim -> tensorflow Model
     :param action_scaling=default_scaling: function to scale the actions form (-1, 1)
         to the range the environment requires
         signature:  (action_tensor -> scaled_action_tensor)
     :param learning_rate=0.0003: Learning rate for adam optimizer.
-        The same learning rate will be used for all networks (Q-Values, Actor)
+        The same learning rate will be used for all policies (Q-Values, Actor)
     :param gamma=0.99: discount factor
     :param tau=0.005:  Polyak averaging coefficient (between 0 and 1)
     :param alpha=0.2: Entropy regularization coefficient (between 0 and 1).
@@ -166,8 +166,8 @@ class Agent:
         :param epochs: Number of epochs to train.
             One epoch is finished if the agents are done ore the maximum steps are reached
         :param environment_steps_before_training=1: Number of steps the agent takes in the environment
-            before the training cycle starts (the networks are updated after each step in the environment)
-        :param training_steps_per_update=1: Number of times the networks are update per update cykle
+            before the training cycle starts (the policies are updated after each step in the environment)
+        :param training_steps_per_update=1: Number of times the policies are update per update cykle
         :param max_environment_steps_per_epoch=None: Maximal number of staps taken in the environment in an epoch
         :param pre_sampling_steps=1024: Number of exploration steps sampled to the replay buffer before training starts
         :param save_models=False: Determines if the models are saved per epoch
