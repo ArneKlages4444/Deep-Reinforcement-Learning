@@ -20,6 +20,7 @@ class Agent:
             kld_threshold=0.05,
             normalize_adv=True,
             value_loss_coefficient=0.5,
+            value_clip_range=None,
             global_clipnorm=0.5,
             log_dir=None,
             verbose=False,
@@ -38,6 +39,7 @@ class Agent:
         self._kld_threshold = kld_threshold
         self._normalize_adv = normalize_adv
         self._value_loss_coefficient = value_loss_coefficient
+        self._value_clip_range = value_clip_range
         self._policy = policy
         self._log_dir = log_dir
         self._verbose = verbose
@@ -99,18 +101,22 @@ class Agent:
     @tf.function
     def learn(self, data_set):
         kld = 0.
-        for s, a, ret, adv, prob_old_policy in data_set:
+        for s, a, ret, adv, prob_old_policy, old_value in data_set:
             if self._normalize_adv:
                 adv = (adv - tfm.reduce_mean(adv)) / (tfm.reduce_std(adv) + 1e-8)
             with tf.GradientTape() as tape:
-                prob_current_policy, entropy, prev_v = self._policy(s, a)
+                prob_current_policy, entropy, predicted_value = self._policy(s, a)
                 actor_loss = self.actor_loss(adv, prob_old_policy, prob_current_policy, entropy)
 
                 log_ratio = prob_current_policy - prob_old_policy
                 kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)  # approximate kld
                 self._approx_kld(kld)
                 if kld < self._kld_threshold:
-                    value_loss = self._value_loss_coefficient * self._mse(ret, prev_v)
+                    if self._value_clip_range is not None:
+                        predicted_value = old_value + tf.clip_by_value(predicted_value - old_value,
+                                                                       -self._value_clip_range,
+                                                                       self._value_clip_range)
+                    value_loss = self._value_loss_coefficient * self._mse(ret, predicted_value)
                     combined_loss = actor_loss + value_loss
 
                     gradients = tape.gradient(combined_loss, self._policy.parameters())

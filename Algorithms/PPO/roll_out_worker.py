@@ -101,6 +101,7 @@ class RollOutWorker:
         g = adv + values  # TD(lambda)
         returns = tf.expand_dims(g, -1)
         advantages = tf.expand_dims(adv, -1)
-        ds = tf.data.Dataset.from_tensor_slices((states, actions, returns, advantages, log_probs)).unbatch()
+        values = tf.expand_dims(values, -1)
+        ds = tf.data.Dataset.from_tensor_slices((states, actions, returns, advantages, log_probs, values)).unbatch()
         self.clear()
         return ds, self.__ret if x < 1 else ack_ret / x, x
