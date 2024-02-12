@@ -4,7 +4,9 @@ import tensorflow as tf
 from gymnasium.wrappers import FrameStack
 
 from agent import Agent
-from policies import MlpGaussianActorCriticPolicy, CnnGaussianActorCriticPolicy, LstmGaussianActorCriticPolicy, \
+from policies import MlpGaussianActorCriticPolicyIndependentSigma, \
+    CnnGaussianActorCriticPolicy, \
+    LstmGaussianActorCriticPolicy, \
     MlpDiscreteActorCriticPolicy
 
 env_name = "InvertedPendulum-v4"  # "CartPole-v1"
@@ -39,9 +41,9 @@ def main():
                                                    state_dim=env.single_observation_space.shape,
                                                    action_space=env.single_action_space)
         elif network_type == "mlp":
-            policy = MlpGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                                  state_dim=env.single_observation_space.shape,
-                                                  action_space=env.single_action_space)
+            policy = MlpGaussianActorCriticPolicyIndependentSigma(action_dim=env.single_action_space.shape[0],
+                                                                  state_dim=env.single_observation_space.shape,
+                                                                  action_space=env.single_action_space)
         else:
             raise Exception(f"Unknown network type {network_type}")
 

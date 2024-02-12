@@ -296,3 +296,85 @@ class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
 
         model = keras.Model(inputs=inputs, outputs=(logits, value))
         return model
+
+
+class MlpGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
+
+    def create_actor_critic_network(self):
+        class MyMlpModel(tf.keras.Model):
+
+            def __init__(self, action_dim):
+                super(MyMlpModel, self).__init__()
+
+                self.mu_0 = Dense(256, activation=tf.nn.relu)
+                self.mu_1 = Dense(256, activation=tf.nn.relu)
+                self.mu_2 = Dense(256, activation=tf.nn.relu)
+                self.mu_out = Dense(action_dim, activation=None)
+
+                self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
+
+                self.v_0 = Dense(256, activation=tf.nn.relu)
+                self.v_1 = Dense(256, activation=tf.nn.relu)
+                self.v_2 = Dense(256, activation=tf.nn.relu)
+                self.value = Dense(1, activation=None)
+
+            @tf.function
+            def call(self, inputs):
+                x = self.mu_0(inputs)
+                x = self.mu_1(x)
+                x = self.mu_2(x)
+                mu = self.mu_out(x)
+
+                y = self.v_0(inputs)
+                y = self.v_1(y)
+                y = self.v_2(y)
+                va = self.value(y)
+                return mu, self.sigma, va
+
+        return MyMlpModel(self._action_dim)
+
+
+class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
+    def __init__(self, state_dim, action_dim, action_space,
+                 sigma_processing=log_sigma_processing,
+                 action_handling=no_action_handling):
+        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
+
+    def create_actor_critic_network(self):
+        class MyCnnModel(tf.keras.Model):
+
+            def __init__(self, action_dim):
+                super(MyCnnModel, self).__init__()
+
+                self.x_0 = Rescaling(scale=1.0 / 127.5, offset=-1)
+                self.x_1 = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu)
+                self.x_2 = Conv2D(filters=64, kernel_size=4, strides=2, padding="valid", activation=tf.nn.relu)
+                self.x_3 = Conv2D(filters=64, kernel_size=3, strides=1, padding="valid", activation=tf.nn.relu)
+                self.x_4 = Flatten()
+                self.x_5 = Dense(512)
+
+                self.y = Dense(256)
+                self.value = Dense(1, activation=None)
+
+                self.z = Dense(256)
+                self.mu = Dense(action_dim, activation=None)
+
+                self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
+
+            @tf.function
+            def call(self, inputs):
+                x = self.x_0(inputs)
+                x = self.x_1(x)
+                x = self.x_2(x)
+                x = self.x_3(x)
+                x = self.x_4(x)
+                x = self.x_5(x)
+
+                y = self.y(x)
+                value = self.value(y)
+
+                z = self.z(x)
+                mu = self.mu(z)
+                return mu, self.sigma, value
+
+        return MyCnnModel(self._action_dim)
