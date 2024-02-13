@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
+from gymnasium.vector.vector_env import VectorEnv
 import time
 
 from policies import ActorCriticPolicy
@@ -10,7 +11,7 @@ from roll_out_worker import RollOutWorker
 class Agent:
     def __init__(
             self,
-            environments,
+            env: VectorEnv,
             policy: ActorCriticPolicy,
             epsilon=0.2,
             gae_lambda=0.95,
@@ -24,11 +25,36 @@ class Agent:
             global_clipnorm=0.5,
             log_dir=None,
             verbose=False,
-            num_envs=4,
             batch_size=256,
             data_set_repeats=4,
             steps_per_epoch=2048
     ):
+        """
+        Proximal Policy Optimization algorithm (PPO)
+
+        Paper: https://arxiv.org/abs/1707.06347
+        Pseudocode: https://spinningup.openai.com/en/latest/algorithms/ppo.html
+        Improvements: https://ppo-details.cleanrl.dev//2021/11/05/ppo-implementation-details/
+
+        :param env: Environment to learn from (conforming to te VectorEnv interface)
+        :param policy: Policy model to be use (determining if continuous or discrete action spaces are used
+            and the neural network models)
+        :param epsilon: Policy clipping parameter
+        :param gae_lambda: Bias vs variance trade-off factor for Generalized Advantage Estimator
+        :param learning_rate: Learning rate for the Adam optimizer
+        :param gamma: Discount factor
+        :param alpha: Entropy coefficient
+        :param kld_threshold: Maximum Kullback-Leibler divergence between updates for early stopping
+        :param normalize_adv: Controls if advantages are normalized
+        :param value_loss_coefficient: Value function coefficient
+        :param value_clip_range: Clipping parameter for the value function
+        :param global_clipnorm: global clipnorm parameter of the Adam optimizer
+        :param log_dir: Log folder for the tensorboard logs
+        :param verbose: Print progress to the console
+        :param batch_size: Minibatch size
+        :param data_set_repeats: Number of repeats of the sampled memory
+        :param steps_per_epoch: Number of time steps sampled per episode/epoch (steps_per_epoch = num_envs * steps)
+        """
         self._epsilon = epsilon
         self._gae_lambda = gae_lambda
         self._gamma = gamma
@@ -43,17 +69,17 @@ class Agent:
         self._policy = policy
         self._log_dir = log_dir
         self._verbose = verbose
-        self._num_envs = num_envs
+        self._num_envs = env.num_envs
         self._batch_size = batch_size
         self._data_set_repeats = data_set_repeats
-        self._steps_per_trajectory = steps_per_epoch // num_envs
+        self._steps_per_trajectory = steps_per_epoch // self._num_envs
         self._shuffle_buffer_size = 1024
         self._roll_out_worker = RollOutWorker(
             self._policy,
-            environments,
+            env,
             self._gamma,
             self._gae_lambda,
-            num_envs,
+            self._num_envs,
         )
         # Monitoring
         self._episode_return = tf.keras.metrics.Mean("episode_return", dtype=tf.float32)
@@ -141,6 +167,10 @@ class Agent:
         return loss
 
     def train(self, epochs):
+        """
+        Train function to start the PPO training
+        :param epochs: number of epochs to train (epochs = total_number_of_time_steps / steps_per_epoch)
+        """
         print("start training!")
         self.__start_time = time.time()
         for e in range(epochs):

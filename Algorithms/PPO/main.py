@@ -48,12 +48,11 @@ def main():
             raise Exception(f"Unknown network type {network_type}")
 
     agent = Agent(
-        environments=env,
+        env=env,
         policy=policy,
         normalize_adv=False,
         log_dir=log_dir,
         verbose=True,
-        num_envs=num_envs,
         batch_size=256,
         data_set_repeats=4,
         steps_per_epoch=2048

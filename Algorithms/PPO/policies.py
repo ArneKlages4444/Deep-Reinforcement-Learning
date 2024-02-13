@@ -8,14 +8,21 @@ import numpy as np
 
 class ActorCriticPolicy:
     def __init__(self, state_dim):
+        """
+        ActorCriticPolicy base class
+        :param state_dim: Dimensions of the state space
+        """
         self._state_dim = state_dim
         self._network = self.create_actor_critic_network()
 
     def parameters(self):
         return self._network.trainable_variables
 
-    # return combined_actor_critic_model
     def create_actor_critic_network(self):
+        """
+        must override function to create the neural network models
+        :returns combined_actor_critic_model
+        """
         return None
 
     # return prob_current_policy, entropy, value
@@ -62,6 +69,14 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
     def __init__(self, state_dim, action_dim, action_space,
                  sigma_processing=log_sigma_processing,
                  action_handling=clip_action_handling):
+        """
+        GaussianActorCriticPolicy: Base class for a continuous gaussian policy
+        :param state_dim: Dimensions of the state space
+        :param state_dim: Dimensions of the action space
+        :param sigma_processing: determines the handling of the standard deviation (as default log std is used)
+        :param action_handling: determines the handling of actions
+            (as default actions that are out of the defined interval are clipped)
+        """
         self._action_dim = action_dim
         super().__init__(state_dim)
         self._min_action = tf.constant(action_space.low, dtype=tf.float32)
@@ -105,6 +120,52 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
     def act_stochastic_in_env(self, state, environment):
         actions_prime, log_probs, value = self.act_stochastic(state)
         observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime.numpy())
+        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
+
+
+class DiscreteActorCriticPolicy(ActorCriticPolicy):
+    def __init__(self, state_dim, n_actions):
+        """
+        GaussianActorCriticPolicy: Base class for a continuous gaussian policy
+        :param state_dim: Dimensions of the state space
+        :param n_actions: number of actions
+        """
+        self._n_actions = n_actions
+        super().__init__(state_dim)
+
+    def create_actor_critic_network(self):
+        raise NotImplementedError()
+
+    def __call__(self, s, a):
+        logits, value = self._network(s)
+        distribution = tfd.Categorical(logits=logits)
+        prob_current_policy = self._log_probs_from_distribution(distribution, tf.squeeze(a, -1))
+        entropy = distribution.entropy()
+        return prob_current_policy, entropy, value
+
+    def get_value(self, state):
+        _, value = self._network(state)
+        return value
+
+    def _log_probs_from_distribution(self, distribution, actions):
+        log_probs = distribution.log_prob(actions)
+        return tf.expand_dims(log_probs, -1)
+
+    def act_stochastic(self, state):
+        logits, value = self._network(state)
+        distribution = tfd.Categorical(logits=logits)
+        actions_prime = distribution.sample()
+        log_probs = self._log_probs_from_distribution(distribution, actions_prime)
+        actions_prime = tf.expand_dims(actions_prime, -1)
+        return actions_prime, log_probs, value
+
+    def act_deterministic(self, state):
+        logits, _ = self._network(state)
+        return tf.math.argmax(logits, axis=-1, output_type=tf.dtypes.int32)
+
+    def act_stochastic_in_env(self, state, environment):
+        actions_prime, log_probs, value = self.act_stochastic(state)
+        observation_prime, reward, terminated, truncated, _ = environment.step(tf.squeeze(actions_prime, -1).numpy())
         return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
 
 
@@ -219,47 +280,6 @@ class LstmGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         return model
 
 
-class DiscreteActorCriticPolicy(ActorCriticPolicy):
-    def __init__(self, state_dim, n_actions):
-        self._n_actions = n_actions
-        super().__init__(state_dim)
-
-    def create_actor_critic_network(self):
-        raise NotImplementedError()
-
-    def __call__(self, s, a):
-        logits, value = self._network(s)
-        distribution = tfd.Categorical(logits=logits)
-        prob_current_policy = self._log_probs_from_distribution(distribution, tf.squeeze(a, -1))
-        entropy = distribution.entropy()
-        return prob_current_policy, entropy, value
-
-    def get_value(self, state):
-        _, value = self._network(state)
-        return value
-
-    def _log_probs_from_distribution(self, distribution, actions):
-        log_probs = distribution.log_prob(actions)
-        return tf.expand_dims(log_probs, -1)
-
-    def act_stochastic(self, state):
-        logits, value = self._network(state)
-        distribution = tfd.Categorical(logits=logits)
-        actions_prime = distribution.sample()
-        log_probs = self._log_probs_from_distribution(distribution, actions_prime)
-        actions_prime = tf.expand_dims(actions_prime, -1)
-        return actions_prime, log_probs, value
-
-    def act_deterministic(self, state):
-        logits, _ = self._network(state)
-        return tf.math.argmax(logits, axis=-1, output_type=tf.dtypes.int32)
-
-    def act_stochastic_in_env(self, state, environment):
-        actions_prime, log_probs, value = self.act_stochastic(state)
-        observation_prime, reward, terminated, truncated, _ = environment.step(tf.squeeze(actions_prime, -1).numpy())
-        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
-
-
 class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
     def __init__(self, state_dim, n_actions, shared_networks=False):
         self._shared_networks = shared_networks
@@ -301,7 +321,7 @@ class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
 class MlpGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
 
     def create_actor_critic_network(self):
-        class MyMlpModel(tf.keras.Model):
+        class MyMlpModel(keras.Model):
 
             def __init__(self, action_dim):
                 super(MyMlpModel, self).__init__()
@@ -341,7 +361,7 @@ class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
         super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
 
     def create_actor_critic_network(self):
-        class MyCnnModel(tf.keras.Model):
+        class MyCnnModel(keras.Model):
 
             def __init__(self, action_dim):
                 super(MyCnnModel, self).__init__()
