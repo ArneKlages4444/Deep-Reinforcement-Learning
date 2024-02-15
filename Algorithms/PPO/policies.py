@@ -3,6 +3,8 @@ import tensorflow.keras as keras
 from tensorflow.keras.layers import Layer, Dense, LSTM, Conv2D, MaxPool2D, Flatten, Reshape, Rescaling, Concatenate
 from tensorflow import math as tfm
 from tensorflow_probability import distributions as tfd
+from tensorflow.keras.initializers import Orthogonal
+from tensorflow.keras.initializers import Zeros
 import numpy as np
 
 
@@ -326,17 +328,35 @@ class MlpGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
             def __init__(self, action_dim):
                 super(MyMlpModel, self).__init__()
 
-                self.mu_0 = Dense(256, activation=tf.nn.relu)
-                self.mu_1 = Dense(256, activation=tf.nn.relu)
-                self.mu_2 = Dense(256, activation=tf.nn.relu)
-                self.mu_out = Dense(action_dim, activation=None)
+                initializer = Orthogonal(np.sqrt(2), seed=1)
+
+                self.mu_0 = Dense(256, activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
+                self.mu_1 = Dense(256, activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
+                self.mu_2 = Dense(256, activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
+                self.mu_out = Dense(action_dim, activation=None,
+                                    kernel_initializer=Orthogonal(0.01),
+                                    bias_initializer=Zeros())
 
                 self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
 
-                self.v_0 = Dense(256, activation=tf.nn.relu)
-                self.v_1 = Dense(256, activation=tf.nn.relu)
-                self.v_2 = Dense(256, activation=tf.nn.relu)
-                self.value = Dense(1, activation=None)
+                self.v_0 = Dense(256, activation=tf.nn.relu,
+                                 kernel_initializer=initializer,
+                                 bias_initializer=Zeros())
+                self.v_1 = Dense(256, activation=tf.nn.relu,
+                                 kernel_initializer=initializer,
+                                 bias_initializer=Zeros())
+                self.v_2 = Dense(256, activation=tf.nn.relu,
+                                 kernel_initializer=initializer,
+                                 bias_initializer=Zeros())
+                self.value = Dense(1, activation=None,
+                                   kernel_initializer=Orthogonal(1),
+                                   bias_initializer=Zeros())
 
             @tf.function
             def call(self, inputs):
@@ -365,19 +385,35 @@ class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
 
             def __init__(self, action_dim):
                 super(MyCnnModel, self).__init__()
-
+                initializer = Orthogonal(np.sqrt(2), seed=1)
                 self.x_0 = Rescaling(scale=1.0 / 127.5, offset=-1)
-                self.x_1 = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu)
-                self.x_2 = Conv2D(filters=64, kernel_size=4, strides=2, padding="valid", activation=tf.nn.relu)
-                self.x_3 = Conv2D(filters=64, kernel_size=3, strides=1, padding="valid", activation=tf.nn.relu)
+                self.x_1 = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
+                self.x_2 = Conv2D(filters=64, kernel_size=4, strides=2, padding="valid", activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
+                self.x_3 = Conv2D(filters=64, kernel_size=3, strides=1, padding="valid", activation=tf.nn.relu,
+                                  kernel_initializer=initializer,
+                                  bias_initializer=Zeros())
                 self.x_4 = Flatten()
-                self.x_5 = Dense(512)
+                self.x_5 = Dense(512, activation=tf.nn.relu,
+                                 kernel_initializer=initializer,
+                                 bias_initializer=Zeros())
 
-                self.y = Dense(256)
-                self.value = Dense(1, activation=None)
+                self.y = Dense(256, activation=tf.nn.relu,
+                               kernel_initializer=initializer,
+                               bias_initializer=Zeros())
+                self.value = Dense(1, activation=None,
+                                   kernel_initializer=Orthogonal(1, seed=0),
+                                   bias_initializer=Zeros())
 
-                self.z = Dense(256)
-                self.mu = Dense(action_dim, activation=None)
+                self.z = Dense(256, activation=tf.nn.relu,
+                               kernel_initializer=initializer,
+                               bias_initializer=Zeros())
+                self.mu = Dense(action_dim, activation=None,
+                                kernel_initializer=Orthogonal(0.01, seed=0),
+                                bias_initializer=Zeros())
 
                 self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
 
