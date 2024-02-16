@@ -180,141 +180,77 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
 
     def create_actor_critic_network(self):
-        if self.shared_networks:
-            return self._creat_network()
-        else:
-            return self._creat_network_separate()
+        initializer = Orthogonal(np.sqrt(2), seed=1)
 
-    def _creat_network(self):
-        inputs = keras.Input(shape=self._state_dim)
-        x = Dense(256, activation=tf.nn.relu)(inputs)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        value = Dense(1, activation=None)(x)
-        mu = Dense(self._action_dim, activation=None)(x)
-        sigma = Dense(self._action_dim, kernel_initializer="zeros")(x)
-        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
-        return model
-
-    def _creat_network_separate(self):
         inputs = keras.Input(shape=self._state_dim)
 
-        x = Dense(256, activation=tf.nn.relu)(inputs)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        mu = Dense(self._action_dim, activation=None)(x)
-        sigma = Dense(self._action_dim, kernel_initializer="zeros")(x)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(inputs)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(x)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(x)
+        mu = Dense(self._action_dim, activation=None,
+                   kernel_initializer=Orthogonal(0.01),
+                   bias_initializer=Zeros())(x)
+        sigma = Dense(self._action_dim,
+                      kernel_initializer=Zeros(),
+                      bias_initializer=Zeros())(x)
 
-        y = Dense(256, activation=tf.nn.relu)(inputs)
-        y = Dense(256, activation=tf.nn.relu)(y)
-        y = Dense(256, activation=tf.nn.relu)(y)
-        value = Dense(1, activation=None)(y)
-
-        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
-        return model
-
-
-class CnnGaussianActorCriticPolicy(GaussianActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, action_space,
-                 sigma_processing=log_sigma_processing,
-                 action_handling=no_action_handling):
-        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
-
-    def create_actor_critic_network(self):
-        inputs = keras.Input(shape=self._state_dim)
-        x = Rescaling(scale=1.0 / 255.0, offset=0)(inputs)
-        x = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu)(x)
-        x = Conv2D(filters=64, kernel_size=4, strides=2, padding="valid", activation=tf.nn.relu)(x)
-        x = Conv2D(filters=64, kernel_size=3, strides=1, padding="valid", activation=tf.nn.relu)(x)
-        x = Flatten()(x)
-        x = Dense(512)(x)
-
-        y = Dense(256)(x)
-        value = Dense(1, activation=None)(y)
-
-        z = Dense(256)(x)
-        mu = Dense(self._action_dim, activation=None)(z)
-        sigma = Dense(self._action_dim, kernel_initializer="zeros")(z)
-
-        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
-        return model
-
-
-class LstmGaussianActorCriticPolicy(GaussianActorCriticPolicy):
-    def __init__(self, state_dim, action_dim, action_space,
-                 sigma_processing=log_sigma_processing,
-                 action_handling=no_action_handling, shared_networks=False):
-        self.shared_networks = shared_networks
-        super().__init__(state_dim, action_dim, action_space, sigma_processing, action_handling)
-
-    def create_actor_critic_network(self):
-        if self.shared_networks:
-            return self._creat_network()
-        else:
-            return self._creat_network_separate()
-
-    def _creat_network(self):
-        inputs = keras.Input(shape=self._state_dim)
-        x = LSTM(256, return_sequences=True)(inputs)
-        x = LSTM(256)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        value = Dense(1, activation=None)(x)
-        mu = Dense(self._action_dim, activation=None)(x)
-        sigma = Dense(self._action_dim, kernel_initializer="zeros")(x)
-        model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
-        return model
-
-    def _creat_network_separate(self):
-        inputs = keras.Input(shape=self._state_dim)
-
-        x = LSTM(256, return_sequences=True)(inputs)
-        x = LSTM(256)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        mu = Dense(self._action_dim, activation=None)(x)
-        sigma = Dense(self._action_dim, kernel_initializer="zeros")(x)
-
-        y = LSTM(256, return_sequences=True)(inputs)
-        y = LSTM(256)(y)
-        y = Dense(256, activation=tf.nn.relu)(y)
-        value = Dense(1, activation=None)(y)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(inputs)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(y)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(y)
+        value = Dense(1, activation=None,
+                      kernel_initializer=Orthogonal(1),
+                      bias_initializer=Zeros())(y)
 
         model = keras.Model(inputs=inputs, outputs=(mu, sigma, value))
         return model
 
 
 class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
-    def __init__(self, state_dim, n_actions, shared_networks=False):
-        self._shared_networks = shared_networks
+    def __init__(self, state_dim, n_actions):
         super().__init__(state_dim, n_actions)
 
     def create_actor_critic_network(self):
-        if self._shared_networks:
-            return self._creat_network()
-        else:
-            return self._creat_network_separate()
+        initializer = Orthogonal(np.sqrt(2), seed=1)
 
-    def _creat_network(self):
-        inputs = keras.Input(shape=self._state_dim)
-        x = Dense(256, activation=tf.nn.relu)(inputs)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        value = Dense(1, activation=None)(x)
-        logits = Dense(self._n_actions, activation=None)(x)
-        model = keras.Model(inputs=inputs, outputs=(logits, value))
-        return model
-
-    def _creat_network_separate(self):
         inputs = keras.Input(shape=self._state_dim)
 
-        x = Dense(256, activation=tf.nn.relu)(inputs)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        x = Dense(256, activation=tf.nn.relu)(x)
-        logits = Dense(self._n_actions, activation=None)(x)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(inputs)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(x)
+        x = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(x)
+        logits = Dense(self._n_actions, activation=None,
+                       kernel_initializer=Orthogonal(0.01),
+                       bias_initializer=Zeros())(x)
 
-        y = Dense(256, activation=tf.nn.relu)(inputs)
-        y = Dense(256, activation=tf.nn.relu)(y)
-        y = Dense(256, activation=tf.nn.relu)(y)
-        value = Dense(1, activation=None)(y)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(inputs)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(y)
+        y = Dense(256, activation=tf.nn.relu,
+                  kernel_initializer=initializer,
+                  bias_initializer=Zeros())(y)
+        value = Dense(1, activation=None,
+                      kernel_initializer=Orthogonal(1),
+                      bias_initializer=Zeros())(y)
 
         model = keras.Model(inputs=inputs, outputs=(logits, value))
         return model
@@ -386,7 +322,8 @@ class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
             def __init__(self, action_dim):
                 super(MyCnnModel, self).__init__()
                 initializer = Orthogonal(np.sqrt(2), seed=1)
-                self.x_0 = Rescaling(scale=1.0 / 127.5, offset=-1)
+                # self.x_0 = Rescaling(scale=1.0 / 127.5, offset=-1)
+                self.x_0 = Rescaling(scale=1.0 / 255.0)
                 self.x_1 = Conv2D(filters=32, kernel_size=8, strides=4, padding="valid", activation=tf.nn.relu,
                                   kernel_initializer=initializer,
                                   bias_initializer=Zeros())
@@ -401,18 +338,18 @@ class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
                                  kernel_initializer=initializer,
                                  bias_initializer=Zeros())
 
-                self.y = Dense(256, activation=tf.nn.relu,
+                self.y = Dense(512, activation=tf.nn.relu,
                                kernel_initializer=initializer,
                                bias_initializer=Zeros())
                 self.value = Dense(1, activation=None,
-                                   kernel_initializer=Orthogonal(1, seed=0),
+                                   kernel_initializer=Orthogonal(1),
                                    bias_initializer=Zeros())
 
-                self.z = Dense(256, activation=tf.nn.relu,
+                self.z = Dense(512, activation=tf.nn.relu,
                                kernel_initializer=initializer,
                                bias_initializer=Zeros())
                 self.mu = Dense(action_dim, activation=None,
-                                kernel_initializer=Orthogonal(0.01, seed=0),
+                                kernel_initializer=Orthogonal(0.01),
                                 bias_initializer=Zeros())
 
                 self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
@@ -434,3 +371,57 @@ class CnnGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
                 return mu, self.sigma, value
 
         return MyCnnModel(self._action_dim)
+
+
+class LstmGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
+    def create_actor_critic_network(self):
+        class MyMlpModel(keras.Model):
+
+            def __init__(self, action_dim):
+                super(MyMlpModel, self).__init__()
+
+                initializer_lstm = Orthogonal(1, seed=1)
+                initializer_mlp = Orthogonal(np.sqrt(2), seed=2)
+
+                self.mu_0 = LSTM(256, return_sequences=True,
+                                 kernel_initializer=initializer_lstm,
+                                 bias_initializer=Zeros())
+                self.mu_1 = LSTM(256,
+                                 kernel_initializer=initializer_lstm,
+                                 bias_initializer=Zeros())
+                self.mu_2 = Dense(256, activation=tf.nn.relu,
+                                  kernel_initializer=initializer_mlp,
+                                  bias_initializer=Zeros())
+                self.mu_out = Dense(action_dim, activation=None,
+                                    kernel_initializer=Orthogonal(0.01),
+                                    bias_initializer=Zeros())
+
+                self.sigma = tf.Variable(initial_value=tf.zeros(action_dim), trainable=True)
+
+                self.v_0 = LSTM(256, return_sequences=True,
+                                kernel_initializer=initializer_lstm,
+                                bias_initializer=Zeros())
+                self.v_1 = LSTM(256,
+                                kernel_initializer=initializer_lstm,
+                                bias_initializer=Zeros())
+                self.v_2 = Dense(256, activation=tf.nn.relu,
+                                 kernel_initializer=initializer_mlp,
+                                 bias_initializer=Zeros())
+                self.value = Dense(1, activation=None,
+                                   kernel_initializer=Orthogonal(1),
+                                   bias_initializer=Zeros())
+
+            @tf.function
+            def call(self, inputs):
+                x = self.mu_0(inputs)
+                x = self.mu_1(x)
+                x = self.mu_2(x)
+                mu = self.mu_out(x)
+
+                y = self.v_0(inputs)
+                y = self.v_1(y)
+                y = self.v_2(y)
+                va = self.value(y)
+                return mu, self.sigma, va
+
+        return MyMlpModel(self._action_dim)

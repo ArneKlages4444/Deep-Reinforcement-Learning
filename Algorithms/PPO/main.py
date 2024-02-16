@@ -5,8 +5,8 @@ from gymnasium.wrappers import FrameStack
 
 from agent import Agent
 from policies import MlpGaussianActorCriticPolicyIndependentSigma, \
-    CnnGaussianActorCriticPolicy, \
-    LstmGaussianActorCriticPolicy, \
+    CnnGaussianActorCriticPolicyIndependentSigma, \
+    LstmGaussianActorCriticPolicyIndependentSigma, \
     MlpDiscreteActorCriticPolicy
 
 env_name = "InvertedPendulum-v4"  # "CartPole-v1"
@@ -33,13 +33,13 @@ def main():
             raise Exception(f"Unknown network type {network_type}")
     else:
         if network_type == "cnn":
-            policy = CnnGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                                  state_dim=env.single_observation_space.shape,
-                                                  action_space=env.single_action_space)
+            policy = CnnGaussianActorCriticPolicyIndependentSigma(action_dim=env.single_action_space.shape[0],
+                                                                  state_dim=env.single_observation_space.shape,
+                                                                  action_space=env.single_action_space)
         elif network_type == "rnn":
-            policy = LstmGaussianActorCriticPolicy(action_dim=env.single_action_space.shape[0],
-                                                   state_dim=env.single_observation_space.shape,
-                                                   action_space=env.single_action_space)
+            policy = LstmGaussianActorCriticPolicyIndependentSigma(action_dim=env.single_action_space.shape[0],
+                                                                   state_dim=env.single_observation_space.shape,
+                                                                   action_space=env.single_action_space)
         elif network_type == "mlp":
             policy = MlpGaussianActorCriticPolicyIndependentSigma(action_dim=env.single_action_space.shape[0],
                                                                   state_dim=env.single_observation_space.shape,

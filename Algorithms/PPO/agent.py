@@ -1,6 +1,9 @@
+from typing import Union
+
 import tensorflow as tf
 from tensorflow import math as tfm
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 from gymnasium.vector.vector_env import VectorEnv
 import time
 
@@ -15,11 +18,11 @@ class Agent:
             policy: ActorCriticPolicy,
             epsilon=0.2,
             gae_lambda=0.95,
-            learning_rate=0.0003,
+            learning_rate: Union[float, LearningRateSchedule] = 0.0003,
             gamma=0.99,
             alpha=0.2,
             kld_threshold=0.05,
-            normalize_adv=True,
+            normalize_adv=False,
             value_loss_coefficient=0.5,
             value_clip_range=None,
             global_clipnorm=0.5,
@@ -42,6 +45,7 @@ class Agent:
         :param epsilon: Policy clipping parameter
         :param gae_lambda: Bias vs variance trade-off factor for Generalized Advantage Estimator
         :param learning_rate: Learning rate for the Adam optimizer
+            (instead of a fixed learning rate, a learning rate schedule can be used)
         :param gamma: Discount factor
         :param alpha: Entropy coefficient
         :param kld_threshold: Maximum Kullback-Leibler divergence between updates for early stopping
@@ -137,7 +141,7 @@ class Agent:
                 log_ratio = prob_current_policy - prob_old_policy
                 kld = tf.math.reduce_mean((tf.math.exp(log_ratio) - 1) - log_ratio)  # approximate kld
                 self._approx_kld(kld)
-                if kld < self._kld_threshold:
+                if not self._kld_threshold or kld < self._kld_threshold:
                     if self._value_clip_range is not None:
                         predicted_value = old_value + tf.clip_by_value(predicted_value - old_value,
                                                                        -self._value_clip_range,
