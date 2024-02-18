@@ -55,7 +55,8 @@ def main():
         verbose=True,
         batch_size=256,
         data_set_repeats=4,
-        steps_per_epoch=2048
+        steps_per_epoch=2048,
+        kld_threshold=0
     )
     agent.train(epochs=100)
 

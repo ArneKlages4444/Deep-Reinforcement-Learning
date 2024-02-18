@@ -155,7 +155,9 @@ class Agent:
                     self._value_loss(value_loss)
                     self._approx_kld(kld)
                     self._network_updates(1)
-            self._last_kld(kld)
+                else:
+                    break
+        self._last_kld(kld)
 
     def actor_loss(self, adv, prob_old_policy, prob_current_policy, entropy):
         # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
