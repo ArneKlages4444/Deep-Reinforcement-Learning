@@ -46,6 +46,12 @@ class ActorCriticPolicy:
     def act_stochastic_in_env(self, state, environment):
         raise NotImplementedError()
 
+    def save(self, path):
+        self._network.save_weights(path)
+
+    def load(self, path_to_parameters):
+        self._network.load_weights(path_to_parameters)
+
 
 def log_sigma_processing(log_sigma):
     return tfm.exp(log_sigma)
@@ -187,10 +193,10 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         x = Dense(256, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(inputs)
-        x = Dense(256, activation=tf.nn.relu,
+        x = Dense(128, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(x)
-        x = Dense(256, activation=tf.nn.relu,
+        x = Dense(64, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(x)
         mu = Dense(self._action_dim, activation=None,
@@ -203,10 +209,10 @@ class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):
         y = Dense(256, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(inputs)
-        y = Dense(256, activation=tf.nn.relu,
+        y = Dense(128, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(y)
-        y = Dense(256, activation=tf.nn.relu,
+        y = Dense(64, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(y)
         value = Dense(1, activation=None,
@@ -229,10 +235,10 @@ class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
         x = Dense(256, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(inputs)
-        x = Dense(256, activation=tf.nn.relu,
+        x = Dense(128, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(x)
-        x = Dense(256, activation=tf.nn.relu,
+        x = Dense(64, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(x)
         logits = Dense(self._n_actions, activation=None,
@@ -242,10 +248,10 @@ class MlpDiscreteActorCriticPolicy(DiscreteActorCriticPolicy):
         y = Dense(256, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(inputs)
-        y = Dense(256, activation=tf.nn.relu,
+        y = Dense(128, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(y)
-        y = Dense(256, activation=tf.nn.relu,
+        y = Dense(64, activation=tf.nn.relu,
                   kernel_initializer=initializer,
                   bias_initializer=Zeros())(y)
         value = Dense(1, activation=None,
@@ -269,10 +275,10 @@ class MlpGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
                 self.mu_0 = Dense(256, activation=tf.nn.relu,
                                   kernel_initializer=initializer,
                                   bias_initializer=Zeros())
-                self.mu_1 = Dense(256, activation=tf.nn.relu,
+                self.mu_1 = Dense(128, activation=tf.nn.relu,
                                   kernel_initializer=initializer,
                                   bias_initializer=Zeros())
-                self.mu_2 = Dense(256, activation=tf.nn.relu,
+                self.mu_2 = Dense(64, activation=tf.nn.relu,
                                   kernel_initializer=initializer,
                                   bias_initializer=Zeros())
                 self.mu_out = Dense(action_dim, activation=None,
@@ -284,10 +290,10 @@ class MlpGaussianActorCriticPolicyIndependentSigma(GaussianActorCriticPolicy):
                 self.v_0 = Dense(256, activation=tf.nn.relu,
                                  kernel_initializer=initializer,
                                  bias_initializer=Zeros())
-                self.v_1 = Dense(256, activation=tf.nn.relu,
+                self.v_1 = Dense(128, activation=tf.nn.relu,
                                  kernel_initializer=initializer,
                                  bias_initializer=Zeros())
-                self.v_2 = Dense(256, activation=tf.nn.relu,
+                self.v_2 = Dense(64, activation=tf.nn.relu,
                                  kernel_initializer=initializer,
                                  bias_initializer=Zeros())
                 self.value = Dense(1, activation=None,

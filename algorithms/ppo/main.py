@@ -56,7 +56,8 @@ def main():
         batch_size=256,
         data_set_repeats=4,
         steps_per_epoch=2048,
-        kld_threshold=0
+        kld_threshold=0.5,
+        value_loss_coefficient=0.1
     )
     agent.train(epochs=100)
 
