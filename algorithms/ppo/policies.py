@@ -53,22 +53,27 @@ class ActorCriticPolicy:
         self._network.load_weights(path_to_parameters)
 
 
+@tf.function
 def log_sigma_processing(log_sigma):
     return tfm.exp(log_sigma)
 
 
+@tf.function
 def clip_sigma_processing(sigma):
     return tf.clip_by_value(sigma, 0, tf.float32.max)
 
 
+@tf.function
 def softplus_sigma_processing(sigma):
     return tfm.softplus(sigma)
 
 
+@tf.function
 def no_action_handling(actions, min_action, max_action):
     return actions
 
 
+@tf.function
 def clip_action_handling(actions, min_action, max_action):
     return tf.clip_by_value(actions, min_action, max_action)
 
