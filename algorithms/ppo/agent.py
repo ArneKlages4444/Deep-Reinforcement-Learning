@@ -159,6 +159,7 @@ class Agent:
                     break
         self._last_kld(kld)
 
+    @tf.function
     def actor_loss(self, adv, prob_old_policy, prob_current_policy, entropy):
         # prob of current policy / prob of old policy (log probs: p/p2 = log(p)-log(p2)
         p = tf.math.exp(prob_current_policy - prob_old_policy)  # exp() to un do log(p)

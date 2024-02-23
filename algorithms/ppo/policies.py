@@ -43,8 +43,8 @@ class ActorCriticPolicy:
     def act_deterministic(self, state):
         raise NotImplementedError()
 
-    def act_stochastic_in_env(self, state, environment):
-        raise NotImplementedError()
+    def process_actions_for_environment(self, actions):
+        return actions
 
     def save(self, path):
         self._network.save_weights(path)
@@ -95,6 +95,7 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
     def create_actor_critic_network(self):
         raise NotImplementedError()
 
+    @tf.function
     def __call__(self, s, a):
         mu, sigma, value = self._network(s)
         sigma = self._sigma_processing(sigma)
@@ -103,14 +104,17 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
         entropy = distribution.entropy()
         return prob_current_policy, entropy, value
 
+    @tf.function
     def get_value(self, state):
         _, _, value = self._network(state)
         return value
 
+    @tf.function
     def _log_probs_from_distribution(self, distribution, actions):
         log_probs = distribution.log_prob(actions)
         return tfm.reduce_sum(log_probs, axis=-1, keepdims=True)
 
+    @tf.function
     def act_stochastic(self, state):
         mu, sigma, value = self._network(state)
         sigma = self._sigma_processing(sigma)
@@ -120,15 +124,14 @@ class GaussianActorCriticPolicy(ActorCriticPolicy):
         actions_prime = self._action_handling(actions_prime, self._min_action, self._max_action)
         return actions_prime, log_probs, value
 
+    @tf.function
     def act_deterministic(self, state):
         mu, _, _ = self._network(state)
         actions = self._action_handling(mu, self._min_action, self._max_action)
         return actions
 
-    def act_stochastic_in_env(self, state, environment):
-        actions_prime, log_probs, value = self.act_stochastic(state)
-        observation_prime, reward, terminated, truncated, _ = environment.step(actions_prime.numpy())
-        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
+    def process_actions_for_environment(self, actions):
+        return actions.numpy()
 
 
 class DiscreteActorCriticPolicy(ActorCriticPolicy):
@@ -144,6 +147,7 @@ class DiscreteActorCriticPolicy(ActorCriticPolicy):
     def create_actor_critic_network(self):
         raise NotImplementedError()
 
+    @tf.function
     def __call__(self, s, a):
         logits, value = self._network(s)
         distribution = tfd.Categorical(logits=logits)
@@ -151,14 +155,17 @@ class DiscreteActorCriticPolicy(ActorCriticPolicy):
         entropy = distribution.entropy()
         return prob_current_policy, entropy, value
 
+    @tf.function
     def get_value(self, state):
         _, value = self._network(state)
         return value
 
+    @tf.function
     def _log_probs_from_distribution(self, distribution, actions):
         log_probs = distribution.log_prob(actions)
         return tf.expand_dims(log_probs, -1)
 
+    @tf.function
     def act_stochastic(self, state):
         logits, value = self._network(state)
         distribution = tfd.Categorical(logits=logits)
@@ -167,14 +174,13 @@ class DiscreteActorCriticPolicy(ActorCriticPolicy):
         actions_prime = tf.expand_dims(actions_prime, -1)
         return actions_prime, log_probs, value
 
+    @tf.function
     def act_deterministic(self, state):
         logits, _ = self._network(state)
         return tf.math.argmax(logits, axis=-1, output_type=tf.dtypes.int32)
 
-    def act_stochastic_in_env(self, state, environment):
-        actions_prime, log_probs, value = self.act_stochastic(state)
-        observation_prime, reward, terminated, truncated, _ = environment.step(tf.squeeze(actions_prime, -1).numpy())
-        return actions_prime, observation_prime, reward, np.logical_or(terminated, truncated), log_probs, value
+    def process_actions_for_environment(self, actions):
+        return tf.squeeze(actions, -1).numpy()
 
 
 class MlpGaussianActorCriticPolicy(GaussianActorCriticPolicy):

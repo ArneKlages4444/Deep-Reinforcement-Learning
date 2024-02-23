@@ -59,7 +59,7 @@ def main():
         kld_threshold=0.5,
         value_loss_coefficient=0.1
     )
-    agent.train(epochs=100)
+    agent.train(epochs=30)
 
 
 if __name__ == "__main__":
